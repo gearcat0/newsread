@@ -1,0 +1,4 @@
+[submodule "vendor/cage"]
+	path = vendor/cage
+	url = https://github.com/gearcat0/cage
+	shallow = true

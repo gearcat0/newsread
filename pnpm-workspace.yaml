@@ -1,0 +1,3 @@
+# No `packages:` on purpose: vendor/cage must not become a workspace member.
+allowBuilds:
+  esbuild: true

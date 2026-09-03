@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>The Example Times &amp; Herald</title>
+    <link>https://example.com/</link>
+    <item>
+      <title><![CDATA[Scaffolding goes up on Monday &amp; Tuesday]]></title>
+      <link>https://example.com/story/1?utm_source=rss</link>
+      <guid isPermaLink="false">tag:example.com,2026:1</guid>
+      <pubDate>Thu, 03 Sep 2026 06:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Relative link item</title>
+      <link>/story/2</link>
+      <pubDate>Wed, 02 Sep 2026 06:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>Guid permalink only</title>
+      <guid>https://example.com/story/3</guid>
+    </item>
+    <item>
+      <title>No usable link</title>
+      <guid isPermaLink="false">nothing</guid>
+    </item>
+  </channel>
+</rss>

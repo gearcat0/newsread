@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title type="html">Example &lt;b&gt;Atom&lt;/b&gt;</title>
+  <link rel="self" href="https://example.com/feed.atom"/>
+  <entry>
+    <title type="html">Works &lt;em&gt;begin&lt;/em&gt; at the north face</title>
+    <link rel="enclosure" type="image/jpeg" href="https://example.com/x.jpg"/>
+    <link rel="alternate" type="text/html" href="/story/10"/>
+    <id>urn:uuid:1</id>
+    <published>2026-09-03T06:00:00Z</published>
+    <updated>2026-09-04T07:00:00Z</updated>
+  </entry>
+  <entry>
+    <title>Single link, no rel</title>
+    <link href="https://example.com/story/11"/>
+    <id>urn:uuid:2</id>
+    <updated>2026-09-04T07:00:00Z</updated>
+  </entry>
+</feed>
