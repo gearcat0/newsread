@@ -1,5 +1,5 @@
 // schema.org JSON-LD: the most reliable metadata source when present.
-import { normalizeText } from '../util/text.js'
+import { decodeEntities, normalizeText } from '../util/text.js'
 
 export interface LdArticle {
   type: string
@@ -50,9 +50,11 @@ function typesOf(n: Node): string[] {
   return []
 }
 
+// JSON-LD strings are frequently HTML-escaped by publishers' templating
+// (`&apos;`, `&amp;`, `&#39;`), and JSON.parse leaves those alone.
 function str(v: unknown): string | undefined {
   if (typeof v === 'string') {
-    const t = normalizeText(v)
+    const t = normalizeText(decodeEntities(v))
     return t || undefined
   }
   if (typeof v === 'number') return String(v)
@@ -74,7 +76,7 @@ function namesOf(v: unknown): string[] {
 }
 
 function urlOf(v: unknown): string | undefined {
-  if (typeof v === 'string') return v.trim() || undefined
+  if (typeof v === 'string') return decodeEntities(v).trim() || undefined
   if (isNode(v)) return str(v['url']) ?? str(v['contentUrl']) ?? str(v['@id'])
   if (Array.isArray(v)) return urlOf(v[0])
   return undefined
@@ -88,7 +90,7 @@ function urlsOf(v: unknown): string[] {
 
 function keywordsOf(v: unknown): string[] {
   if (Array.isArray(v)) return v.flatMap(keywordsOf)
-  if (typeof v === 'string') return v.split(',').map((s) => normalizeText(s)).filter(Boolean)
+  if (typeof v === 'string') return decodeEntities(v).split(',').map((s) => normalizeText(s)).filter(Boolean)
   if (isNode(v)) return namesOf(v)
   return []
 }

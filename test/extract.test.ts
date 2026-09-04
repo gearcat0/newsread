@@ -149,6 +149,21 @@ describe('metadata', () => {
     expect(m.canonicalUrl).toBe('https://www.example.com/local/scaffolding-monday')
     expect(m.leadImage?.candidates[0]?.url).toBe('https://cdn.example.com/lead-1200.jpg')
   })
+  it('decodes HTML entities that publishers leave inside JSON-LD strings', () => {
+    const html = `<html><head><script type="application/ld+json">${JSON.stringify({
+      '@type': 'NewsArticle',
+      headline: '&apos;We didn&#39;t want them:&apos; Tom &amp; Jerry &ldquo;rally&rdquo;',
+      author: { '@type': 'Person', name: 'O&apos;Brien' },
+      keywords: 'A &amp; B, C',
+      mainEntityOfPage: 'https://www.example.com/s?a=1&amp;b=2'
+    })}</script></head><body></body></html>`
+    const doc = parseHtml(html, 'https://www.example.com/s')
+    const m = extractMeta(doc, { site, fetchedUrl: 'https://www.example.com/s', now: NOW })
+    expect(m.title).toBe("'We didn't want them:' Tom & Jerry “rally”")
+    expect(m.authors).toEqual(["O'Brien"])
+    expect(m.keywords).toEqual(['A & B', 'C'])
+    expect(m.canonicalUrl).toBe('https://www.example.com/s?a=1&b=2')
+  })
   it('falls back to OG/meta, strips title suffix, rejects a canonical on a foreign host', () => {
     const url = 'https://other.example.org/quiet?utm_medium=x'
     const doc = parseHtml(fx('og-only.html'), url)
