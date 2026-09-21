@@ -14,5 +14,5 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src", "test", "newsread.config.ts", "vitest.config.ts", "vendor/cage/src/format/**/*.ts"]
+  "include": ["src", "test", "newsread.config.ts", "vitest.config.ts", "vendor/souspli/src/format/**/*.ts"]
 }

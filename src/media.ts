@@ -1,5 +1,5 @@
 // Download the images (and optionally videos) an article references, sniff
-// their real MIME, de-duplicate by content hash, and hand out cage attachment
+// their real MIME, de-duplicate by content hash, and hand out Souspli attachment
 // names in document order. Failures drop the figure rather than leaving a
 // permanent "image not attached" placeholder.
 import type { ImagePolicy, MediaConfig } from './config.js'
@@ -7,7 +7,7 @@ import type { HttpClient } from './http.js'
 import type { IrBlock, IrDocument, IrImage } from './ir.js'
 import type { ImageCandidate } from './extract/srcset.js'
 import { isImageMime, isVideoMime, sniffMime } from './sniff.js'
-import { hash, toHex } from './cage.js'
+import { hash, toHex } from './souspli.js'
 import { hostMatches } from './util/url.js'
 import { mapLimit } from './util/limiter.js'
 

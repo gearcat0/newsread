@@ -1,5 +1,5 @@
 /** Byte strings with valid magic numbers for the sniffer. Not decodable images —
- *  cage never decodes them either, it serves bytes under the sniffed MIME. */
+ *  Souspli never decodes them either, it serves bytes under the sniffed MIME. */
 function pad(head: number[], seed: number, size = 64): Uint8Array {
   const out = new Uint8Array(Math.max(size, head.length))
   out.set(head, 0)

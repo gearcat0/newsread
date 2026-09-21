@@ -1,6 +1,6 @@
-// IR → cage article args. This is the ONLY place the rich IR is lossy: inline
+// IR → Souspli article args. This is the ONLY place the rich IR is lossy: inline
 // links, emphasis, list structure, quotes, code and tables are reduced to the
-// six block kinds cage renders. When cage gains inline links, change `inlineText`
+// six block kinds Souspli renders. When Souspli gains inline links, change `inlineText`
 // and the paragraph emitter here and nothing upstream.
 import type { LimitsConfig } from './config.js'
 import type { Inline, IrBlock, IrDocument } from './ir.js'

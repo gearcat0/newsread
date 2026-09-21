@@ -1,6 +1,6 @@
 // Intermediate representation of an extracted article. Deliberately richer than
-// cage's article args: inline links, emphasis, lists, quotes, tables and code
-// all survive here. Only `flatten.ts` reduces this to cage blocks, so when cage
+// Souspli's article args: inline links, emphasis, lists, quotes, tables and code
+// all survive here. Only `flatten.ts` reduces this to Souspli blocks, so when Souspli
 // gains inline links, that is the one module to change.
 
 export type Inline =

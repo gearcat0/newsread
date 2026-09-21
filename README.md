@@ -2,12 +2,13 @@
 
 A small, personal news archiver. It polls the RSS/Atom feeds of sites you read,
 extracts each article, and writes it as a signed **`.thing`** bundle in the
-`article` format that [cage](https://github.com/gearcat0/cage) renders. Low
+`article` format that [Souspli](https://github.com/souspli/souspli) renders
+(see [souspli.org](https://souspli.org)). Low
 volume by design: one host at a time, a pause between requests, no crawling.
 
 ```
 feeds ─▶ fetch ─▶ extract (Readability + JSON-LD/OG) ─▶ rich IR ─▶ download images
-      ─▶ flatten to cage blocks ─▶ build + sign ─▶ self-verify ─▶ out/<site>/*.thing
+      ─▶ flatten to Souspli blocks ─▶ build + sign ─▶ self-verify ─▶ out/<site>/*.thing
 ```
 
 ## Setup
@@ -20,11 +21,13 @@ pnpm install
 pnpm newsread init        # writes newsread.config.ts, creates the signing key, prints your author address
 ```
 
-`vendor/cage` is a git submodule pinned to a specific cage commit. The scraper
-imports cage's `src/format` (canonical CBOR, bundle building, signing) directly
-from it and ships `vendor/cage/samples/article.html` byte-for-byte as every
-article's program. **Bumping the submodule changes that program hash**, and the
-shell groups things by `(type, program hash)`, so bump deliberately.
+`vendor/souspli` is a git submodule pinned to a specific Souspli commit. The
+scraper imports Souspli's `src/format` (canonical CBOR, bundle building, signing)
+directly from it and ships `vendor/souspli/samples/article.html` byte-for-byte as
+every article's program. **Bumping the submodule can change that program hash**,
+and the reader groups things by `(type, program hash)`, so bump deliberately and
+check the hash `newsread init` prints. The vendored code is Apache-2.0; see
+`vendor/souspli/LICENSE` and `NOTICE`.
 
 ## Configure
 
@@ -68,26 +71,27 @@ pnpm newsread verify out                # every .thing admits as a well-formed a
 pnpm newsread whoami                    # the author address the shell will show
 ```
 
-Get an article into cage the way you get any thing in: double-click the
+Get an article into Souspli the way you get any thing in: double-click the
 `.thing`, drag it into the window, **Open file…**, or paste
-`file:///absolute/path/to/story.thing` in the omnibar. The feed badge reads
-`article` with the address `whoami` printed.
+`file:///absolute/path/to/story.thing` in the omnibar. The feed row reads
+`article`, the address `whoami` printed, and the article's title as the reader
+sanitises it (one line, at most 80 characters, check-mark characters removed).
 
 Re-running is cheap and idempotent. A story whose content has not changed emits
 nothing; one that has changed becomes the next version in its chain
-(`path`/`seq`/`prev` on the envelope), so the shell shows a revision rather than
-a duplicate or a fork. Add `--refresh` to re-check stories already archived.
+(`path`/`seq`/`prev` on the envelope). The reader collapses a chain to its latest
+version, so a re-scraped story stays one row instead of piling up duplicates. Add `--refresh` to re-check stories already archived.
 `--debug` writes `.args.json` and `.ir.json` sidecars beside each `.thing`.
 
 ## What survives, what does not
 
-cage's article body is six block kinds of plain text plus named image/video
+Souspli's article body is six block kinds of plain text plus named image/video
 attachments. The extractor keeps a richer intermediate representation
 (`src/ir.ts` — inline links, emphasis, lists, quotes, tables, code) and only
 `src/flatten.ts` reduces it. Today that means:
 
 - **Inline links are dropped** (the text stays; the href does not). This is a
-  known gap in the format; when cage grows link support, `flatten.ts` is the
+  known gap in the format; when Souspli grows link support, `flatten.ts` is the
   one module to change.
 - Lists become `• ` / `1. ` paragraphs; blockquotes are quoted; tables become
   ` | `-joined rows (large ones are footnoted instead); code becomes one
@@ -100,7 +104,7 @@ attachments. The extractor keeps a richer intermediate representation
   wrote them (no timezone shifting), and `retrieved` is the local date you ran.
 
 Metadata (`publisher`, `authors`, `published`, `sourceUrl`, …) is recorded as
-found. cage shows it as a claim, and it is one.
+found. Souspli shows it as a claim, and it is one.
 
 ## Politeness
 

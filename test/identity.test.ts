@@ -4,20 +4,20 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { ethAddress, ethSigner, identityFromKey, loadOrCreateIdentity, shortAddress, toChecksumAddress, IdentityError } from '../src/identity.js'
-import { toChecksumAddress as cageChecksum, shortAddress as cageShort } from '../vendor/cage/src/shell/address.js'
-import { admitBundle, buildBundle, parseBundle, toHex } from '../src/cage.js'
+import { toChecksumAddress as souspliChecksum, shortAddress as souspliShort } from '../vendor/souspli/src/shell/address.js'
+import { admitBundle, buildBundle, parseBundle, toHex } from '../src/souspli.js'
 
 const tmp = (): string => mkdtempSync(join(process.env['NEWSREAD_TEST_TMP'] ?? tmpdir(), 'newsread-id-'))
 
 describe('identity', () => {
-  it('address helpers match cage byte for byte', () => {
+  it('address helpers match Souspli byte for byte', () => {
     const priv = secp256k1.utils.randomSecretKey()
     const hex = toHex(ethAddress(priv))
-    expect(toChecksumAddress(hex)).toBe(cageChecksum(hex))
-    expect(shortAddress(hex)).toBe(cageShort(hex))
+    expect(toChecksumAddress(hex)).toBe(souspliChecksum(hex))
+    expect(shortAddress(hex)).toBe(souspliShort(hex))
     expect(toChecksumAddress('0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359')).toBe('0xfB6916095ca1df60bB79Ce92cE3Ea74c37c5d359')
   })
-  it('the signer is accepted by cage admission and identified as the author', async () => {
+  it('the signer is accepted by Souspli admission and identified as the author', async () => {
     const priv = secp256k1.utils.randomSecretKey()
     const id = identityFromKey(priv)
     const tar = await buildBundle(ethSigner(priv), { program: new TextEncoder().encode('<p>x</p>'), type: 'page' })

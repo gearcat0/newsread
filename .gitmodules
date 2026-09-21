@@ -1,4 +1,4 @@
-[submodule "vendor/cage"]
-	path = vendor/cage
-	url = https://github.com/gearcat0/cage
+[submodule "vendor/souspli"]
+	path = vendor/souspli
+	url = https://github.com/souspli/souspli
 	shallow = true

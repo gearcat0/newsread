@@ -3,7 +3,7 @@
 import { type Config, type Site, expandPath } from './config.js'
 import type { HttpClient } from './http.js'
 import { decodeHtml } from './http.js'
-import type { Signer } from './cage.js'
+import type { Signer } from './souspli.js'
 import type { ArticleMeta, IrDocument } from './ir.js'
 import { baseUrlOf, parseHtml, removeAll } from './extract/dom.js'
 import { type BodyResult, domToIr, extractBody } from './extract/body.js'

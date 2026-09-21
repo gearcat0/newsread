@@ -2,7 +2,7 @@
   "name": "newsread",
   "version": "0.1.0",
   "private": true,
-  "description": "Low-volume personal news scraper that emits cage `article` things",
+  "description": "Low-volume personal news scraper that emits Souspli `article` things",
   "type": "module",
   "engines": {
     "node": ">=24"

@@ -6,13 +6,13 @@ import { type Config, ConfigError, expandPath, genericSite, loadConfig, siteForU
 import { createHttpClient } from './http.js'
 import { loadOrCreateIdentity } from './identity.js'
 import { StateStore } from './state.js'
-import { programHashHex } from './cage.js'
+import { programHashHex } from './souspli.js'
 import { type Inspection, inspectBundle } from './bundle.js'
 import { ALLOWED_MIMES } from './sniff.js'
 import { type Ctx, type Flags, type Logger, type Outcome, describe, processUrl, runSite } from './pipeline.js'
 import { formatBytes, KiB } from './util/bytes.js'
 
-const USAGE = `newsread — archive news articles as cage \`article\` things
+const USAGE = `newsread — archive news articles as Souspli \`article\` things
 
 usage:
   newsread init                              create newsread.config.ts, the signing key, out/ and state/
@@ -204,7 +204,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         mkdirSync(expandPath(config.outDir), { recursive: true })
         console.error(`${created ? 'created' : 'using'} identity ${expandPath(config.identityFile)}`)
         console.log(`author:  ${address}`)
-        console.log(`program: ${programHashHex()} (vendor/cage/samples/article.html)`)
+        console.log(`program: ${programHashHex()} (vendor/souspli/samples/article.html)`)
         return 0
       }
       case 'whoami': {

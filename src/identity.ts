@@ -1,14 +1,14 @@
 // The scraper's signing identity: one secp256k1 key, kept as hex in a 0600
 // file. Every article it emits carries this key as author; the metadata inside
 // is hearsay, the signature is the only verified fact. `ethSigner` mirrors
-// cage's test helper and keyring (eth-eip191, recovery byte +27), and the
-// address helpers are copied from cage's src/shell/address.ts so what we print
+// Souspli's test helper and keyring (eth-eip191, recovery byte +27), and the
+// address helpers are copied from Souspli's src/shell/address.ts so what we print
 // matches what the shell shows.
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { keccak_256 } from '@noble/hashes/sha3.js'
-import type { Signer } from './cage.js'
+import type { Signer } from './souspli.js'
 
 export class IdentityError extends Error {
   override name = 'IdentityError'

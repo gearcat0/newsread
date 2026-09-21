@@ -1,4 +1,4 @@
-// Text normalisation shared by extraction and flattening. cage renders block text
+// Text normalisation shared by extraction and flattening. Souspli renders block text
 // via textContent with no white-space CSS, so newlines collapse anyway; we
 // normalise up front so hashes and byte budgets are stable.
 

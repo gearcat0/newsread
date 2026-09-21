@@ -1,4 +1,4 @@
-// MIME from magic bytes. The response content-type is ignored entirely: cage
+// MIME from magic bytes. The response content-type is ignored entirely: Souspli
 // serves attachments under nosniff, so a mislabelled blob simply does not
 // render, and an allowlist keeps SVG/HTML out of the bundle.
 

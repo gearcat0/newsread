@@ -2,7 +2,7 @@
 import {
   admitBundle, buildBundle, cborToJs, chainInfo, encode, fromHex, hash, jsToCbor, loadProgram, parseBundle,
   programHashHex, toHex, type Signer
-} from './cage.js'
+} from './souspli.js'
 import type { ArticleArgs } from './args.js'
 import { toChecksumAddress } from './identity.js'
 import { concatBytes, utf8 } from './util/bytes.js'

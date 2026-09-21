@@ -65,7 +65,7 @@ export interface MediaConfig {
 }
 
 export interface LimitsConfig {
-  /** cage's article.html MAX_BLOCKS. */
+  /** Souspli's article.html MAX_BLOCKS. */
   maxBlocks: number
   /** Trim to this so articles stay editable in the shell (draft cap is 256 KiB). */
   targetArgsBytes: number

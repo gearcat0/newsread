@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { buildArticle, contentHash, inspectBundle, BuildError } from '../src/bundle.js'
 import { ethSigner } from '../src/identity.js'
-import { admitBundle, parseBundle, cborToJs, programHashHex, toHex } from '../src/cage.js'
+import { admitBundle, parseBundle, cborToJs, programHashHex, toHex } from '../src/souspli.js'
 import type { ArticleArgs } from '../src/args.js'
 import { storyPath } from '../src/state.js'
 import * as img from './helpers/images.js'
@@ -27,7 +27,7 @@ const args: ArticleArgs = {
 const attachments = new Map([['img-1', { bytes: img.png(1), mime: 'image/png' }]])
 
 describe('buildArticle', () => {
-  it('produces a bundle cage admits as a valid article with the right program and attachments', async () => {
+  it('produces a bundle Souspli admits as a valid article with the right program and attachments', async () => {
     const built = await buildArticle(signer, args, attachments, { path: storyPath(args.sourceUrl!), seq: 1 }, 1_756_944_000, 256 * KiB)
     const r = admitBundle(parseBundle(built.tar))
     expect(r.status).toBe('valid')

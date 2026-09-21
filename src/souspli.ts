@@ -1,4 +1,4 @@
-// The ONLY module that reaches into vendor/cage. Everything else imports the
+// The ONLY module that reaches into vendor/souspli. Everything else imports the
 // thing-format API and the article program from here, so a submodule bump or a
 // future move to a published package is a one-file change.
 import { readFileSync } from 'node:fs'
@@ -17,7 +17,7 @@ export {
   chainInfo,
   DEFAULT_LIMITS,
   DEFAULT_BUNDLE_LIMITS
-} from '../vendor/cage/src/format/index.js'
+} from '../vendor/souspli/src/format/index.js'
 export type {
   Signer,
   CborValue,
@@ -25,15 +25,15 @@ export type {
   Hash,
   Manifest,
   Envelope
-} from '../vendor/cage/src/format/index.js'
+} from '../vendor/souspli/src/format/index.js'
 
-import { hash as sha256, toHex as hex } from '../vendor/cage/src/format/index.js'
+import { hash as sha256, toHex as hex } from '../vendor/souspli/src/format/index.js'
 
-/** The article renderer that ships with cage. Its bytes ARE the program of every
+/** The article renderer that ships with Souspli. Its bytes ARE the program of every
  *  article thing; the shell groups things by (type, sha256(program)), so this
  *  file must be shipped byte-for-byte. */
 export const ARTICLE_PROGRAM_PATH = fileURLToPath(
-  new URL('../vendor/cage/samples/article.html', import.meta.url)
+  new URL('../vendor/souspli/samples/article.html', import.meta.url)
 )
 
 let programCache: Uint8Array | undefined

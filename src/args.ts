@@ -1,5 +1,5 @@
-// cage's article args, typed. Every scalar is a string; dates are YYYY-MM-DD.
-import { encode, jsToCbor } from './cage.js'
+// Souspli's article args, typed. Every scalar is a string; dates are YYYY-MM-DD.
+import { encode, jsToCbor } from './souspli.js'
 
 export type TextKind = 'heading' | 'subheading' | 'paragraph' | 'footnote'
 export type Placement = 'left' | 'right' | 'full'
@@ -38,7 +38,7 @@ export interface ArticleArgs {
   blocks: Block[]
 }
 
-/** Exact size of the canonical-CBOR encoding cage will store. */
+/** Exact size of the canonical-CBOR encoding Souspli will store. */
 export function encodedArgsBytes(args: ArticleArgs): number {
   return encode(jsToCbor(args)).length
 }

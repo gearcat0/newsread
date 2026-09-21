@@ -1,5 +1,5 @@
 // Body extraction: Readability (or a per-site selector) picks the article root;
-// domToIr walks that root into the rich IR. Nothing here knows about cage.
+// domToIr walks that root into the rich IR. Nothing here knows about Souspli.
 import { Readability } from '@mozilla/readability'
 import type { Site } from '../config.js'
 import type { Inline, IrBlock, IrImage } from '../ir.js'

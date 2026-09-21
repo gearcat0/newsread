@@ -3,7 +3,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { FeedMeta, FeedStateAccess } from './discover.js'
-import { hash, toHex } from './cage.js'
+import { hash, toHex } from './souspli.js'
 import { utf8 } from './util/bytes.js'
 
 export interface StoryRecord {
