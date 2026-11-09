@@ -1,3 +1,7 @@
 # No `packages:` on purpose: vendor/souspli must not become a workspace member.
 allowBuilds:
   esbuild: true
+# Security floors for transitive dev deps (vitest -> vite -> postcss -> source-map-js).
+overrides:
+  vite: ^8.2.4
+  source-map-js: ^1.2.2
