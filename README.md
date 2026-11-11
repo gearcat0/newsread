@@ -83,6 +83,126 @@ nothing; one that has changed becomes the next version in its chain
 version, so a re-scraped story stays one row instead of piling up duplicates. Add `--refresh` to re-check stories already archived.
 `--debug` writes `.args.json` and `.ir.json` sidecars beside each `.thing`.
 
+## Publishing: articles to Souspli readers as they are fetched
+
+`newsread serve` runs forever. It scrapes on an interval, puts every new article
+on BitTorrent, announces it on a Nostr relay, and answers readers who write to it
+asking to subscribe.
+
+```
+scrape ─▶ .thing ─▶ webseed (HTTPS) ─▶ .torrent (url-list → webseed) ─▶ seed boxes
+       ─▶ one box has it all (or the webseed answers, after seedTimeoutMs)
+       ─▶ kind-3400 pointer on the relay, signed by this account's relay key
+relay  ─▶ sealed memo "subscribe guardian" ─▶ subscriber list ─▶ sealed reply
+```
+
+Why it is shaped like this:
+
+- **Every article is a pointer.** The article program alone is over the 32 KiB
+  inline cap, so the relay event carries the hash and a magnet, never the bytes.
+- **The webseed is load-bearing.** It is how the bytes reach the seed boxes: they
+  download from it as if it were a peer. It is also a source that always answers.
+  The `.torrent` is published beside the file and named in the magnet as `xs=`.
+  Without that, a reader who reaches no peer would wait for metadata forever, since
+  a webseed serves bytes, not metadata. This was checked against the shell's own
+  webtorrent, with no swarm.
+- **Readers join the same swarm.** The torrent is single-file, named
+  `article-<hash8>.thing`, with create-torrent's piece length. A Souspli reader who
+  turns on seeding produces the **same infohash** (`test/torrent.test.ts` pins
+  vectors from create-torrent 6.1.3).
+- **Every article binds this account's relay key** (`Author.ek`, derived exactly as
+  the Souspli keyring does). That is what lets a reader write privately to the bot,
+  and what a subscribed reader's app checks a pointer against.
+
+### What a reader does
+
+1. Adds the relay in **File → Relays…**. The bot's **about memo** appears in their
+   feed; it is small enough to travel whole. Each article appears as an offer with a
+   **Fetch** button.
+2. In **People**, presses **Subscribe…** on this account. Their app then fetches new
+   articles as they are announced, from the feeds they choose. The same dialog
+   starts a private memo, `subscribe guardian`, which they publish and send through
+   the relay.
+3. The bot answers with a sealed memo confirming what they will get.
+
+Requests (subject, or first line of a private memo): `subscribe all`,
+`subscribe <site> …`, `unsubscribe all`, `unsubscribe <site> …`, `list`. A request
+must be **sealed to the bot**. A public memo, even one signed by the reader, is
+ignored, because anyone could replay it. For each reader, the letter they wrote
+latest wins.
+
+With `scrape: 'subscribed'`, only sites somebody subscribed to (or marked
+`always: true`) are scraped.
+
+### Configure
+
+```ts
+export default defineConfig({
+  relays: ['wss://news-relay.example.org'],
+  about: { name: 'Example News', description: 'World news from the Guardian.' },
+  scrape: 'subscribed',
+  publish: {
+    trackers: ['udp://tracker.example.org:6969/announce', 'udp://tracker.opentrackr.org:1337/announce'],
+    // where the bytes are served from: a directory a web server serves…
+    webseed: { kind: 'dir', dir: '/srv/www/things', baseUrl: 'https://seed.example.org/things' },
+    // …or an S3-compatible bucket (R2, B2, MinIO, AWS) with a public URL:
+    // webseed: { kind: 's3', endpoint: 'https://<acct>.r2.cloudflarestorage.com', bucket: 'things',
+    //            region: 'auto', publicBaseUrl: 'https://seed.example.org' },
+    seedboxes: [
+      { kind: 'qbittorrent', name: 'box1', url: 'http://box1:8080', savePath: '/data/things' },
+      { kind: 'transmission', name: 'box2', url: 'http://box2:9091/transmission/rpc' },
+      { kind: 'deluge', name: 'box3', url: 'http://box3:8112' },
+      // rTorrent cannot download from webseeds: point it at the `dir` webseed's directory
+      { kind: 'rtorrent', name: 'box4', url: 'https://box4/RPC2', directory: '/srv/www/things' }
+    ],
+    // seedTimeoutMs: 600000,   announce on the webseed alone if no box finishes by then
+    // backlogDays: 2,          never publish the old archive when publishing is first turned on
+  },
+  sites: [ /* … */ ]
+})
+```
+
+Credentials go in `$XDG_CONFIG_HOME/newsread/secrets.json`, mode **0600**. newsread
+refuses to read it if anyone else can:
+
+```json
+{
+  "seedboxes": { "box1": { "username": "admin", "password": "…" }, "box3": { "password": "…" } },
+  "webseed": { "accessKeyId": "…", "secretAccessKey": "…" }
+}
+```
+
+### The relay
+
+Use a separate deployment of Souspli's relay (`relay/` in that repo, environment
+`news`). Then put this account's relay key in its `TRUSTED_PUBKEYS`, so a burst of
+articles is never rate-limited:
+
+```sh
+pnpm newsread relays     # checks each relay answers; prints the key to trust
+```
+
+### Commands
+
+```sh
+pnpm newsread serve [--every 10m] [--site id]   # the daemon
+pnpm newsread publish        # one pass: stage, poll the boxes, announce what is ready
+pnpm newsread inbox          # read sealed letters once and answer them (for cron)
+pnpm newsread subscribers [--json]
+pnpm newsread whoami         # the author address, and the relay key
+```
+
+State, including what is staged, announced, who subscribed and the relay cursors,
+is kept in `state/newsread.json` (v2; a v1 file migrates on load). Each step
+resumes where it stopped.
+
+### Checking a seed box
+
+The four adapters are tested against each API's documented request and response
+shapes, not against live clients. Before relying on one, run
+`newsread publish` with that box alone configured, and check that the box shows the
+torrent at 100%.
+
 ## What survives, what does not
 
 Souspli's article body is six block kinds of plain text plus named image/video

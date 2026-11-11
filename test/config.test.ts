@@ -29,3 +29,36 @@ describe('defineConfig', () => {
     expect(expandPath('$XDG_CONFIG_HOME/newsread/k', '/cwd')).toMatch(/\/newsread\/k$/)
   })
 })
+
+describe('publish, relays and scrape config', () => {
+  const sites = [{ id: 'a', hosts: ['a.com'], feeds: [] }]
+  const webseed = { kind: 'dir' as const, dir: '/srv/www', baseUrl: 'https://seed.example' }
+  it('defaults: no publishing, no relays, scrape all', () => {
+    const c = defineConfig({ sites })
+    expect(c.publish).toBeUndefined()
+    expect(c.relays).toEqual([])
+    expect(c.scrape).toBe('all')
+    expect(c.about.repostDays).toBe(7)
+  })
+  it('fills publish defaults and keeps seed boxes', () => {
+    const c = defineConfig({ sites, relays: ['wss://r.example'], publish: { trackers: ['udp://t:1/announce'], webseed, seedboxes: [{ kind: 'transmission', name: 'tr', url: 'http://b:9091/transmission/rpc' }] } })
+    expect(c.publish?.seedTimeoutMs).toBe(600_000)
+    expect(c.publish?.backlogDays).toBe(2)
+    expect(c.publish?.seedboxes[0]?.kind).toBe('transmission')
+  })
+  it('refuses what cannot work', () => {
+    const p = (over: object) => () => defineConfig({ sites, publish: { trackers: ['udp://t:1/announce'], webseed, seedboxes: [], ...over } })
+    expect(p({ trackers: [] })).toThrow(/tracker/)
+    expect(p({ trackers: ['magnet:x'] })).toThrow(/tracker/)
+    expect(p({ webseed: undefined })).toThrow(/webseed/)
+    expect(p({ webseed: { kind: 's3', endpoint: 'https://e' } })).toThrow(/s3/)
+    expect(p({ seedboxes: [{ kind: 'utorrent', name: 'x', url: 'http://x' }] })).toThrow(/unknown seed box/)
+    expect(p({ seedboxes: [{ kind: 'deluge', name: 'a', url: 'http://x' }, { kind: 'deluge', name: 'a', url: 'http://y' }] })).toThrow(/duplicate/)
+    expect(p({ seedboxes: [{ kind: 'qbittorrent', name: 'bad name', url: 'http://x' }] })).toThrow(/name/)
+    expect(
+      p({ webseed: { kind: 's3', endpoint: 'https://e', bucket: 'b', region: 'auto', publicBaseUrl: 'https://p' }, seedboxes: [{ kind: 'rtorrent', name: 'rt', url: 'http://x', directory: '/d' }] })
+    ).toThrow(/rtorrent cannot use webseeds/)
+    expect(() => defineConfig({ sites, relays: ['https://not-ws'] })).toThrow(/ws\(s\)/)
+    expect(() => defineConfig({ sites, scrape: 'some' as 'all' })).toThrow(/scrape/)
+  })
+})

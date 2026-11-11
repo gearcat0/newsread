@@ -3,6 +3,7 @@ import { normalizeText, normalizeLines, truncate, dedupeCi } from '../src/util/t
 import { toIsoDate, localIsoDate } from '../src/util/dates.js'
 import { slugify } from '../src/util/slug.js'
 import { normalizeUrl, hostMatches, resolveHttp, isTrackingParam } from '../src/util/url.js'
+import { parseDuration } from '../src/cli.js'
 import { HostLimiter, Semaphore, mapLimit } from '../src/util/limiter.js'
 import { parseSrcset, pickCandidate } from '../src/extract/srcset.js'
 
@@ -163,5 +164,15 @@ describe('srcset', () => {
     expect(pickCandidate([{ url: 'a', density: 1 }, { url: 'b', density: 2 }])!.url).toBe('b')
     expect(pickCandidate([{ url: 'a' }, { url: 'b' }])!.url).toBe('a')
     expect(pickCandidate([])).toBeUndefined()
+  })
+})
+
+describe('parseDuration', () => {
+  it('reads ms/s/m/h', () => {
+    expect(parseDuration('10m')).toBe(600_000)
+    expect(parseDuration('90s')).toBe(90_000)
+    expect(parseDuration('1.5h')).toBe(5_400_000)
+    expect(parseDuration('250')).toBe(250)
+    expect(parseDuration('soon')).toBeUndefined()
   })
 })

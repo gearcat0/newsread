@@ -53,6 +53,42 @@ export interface Site {
   fetch?: FetchOptions
   /** Cap on new articles per run for this site. */
   maxPerRun?: number
+  /** With `scrape: 'subscribed'`, scrape this site even when nobody has asked for it. */
+  always?: boolean
+}
+
+export type WebSeedConfig =
+  /** A directory some web server already serves at `baseUrl`. */
+  | { kind: 'dir'; dir: string; baseUrl: string }
+  /** An S3-compatible bucket. Credentials come from the secrets file. */
+  | { kind: 's3'; endpoint: string; bucket: string; region: string; publicBaseUrl: string; prefix?: string }
+
+/** A seed box's web API. Credentials come from the secrets file, under `name`. */
+export type SeedBoxConfig =
+  | { kind: 'qbittorrent'; name: string; url: string; savePath?: string; category?: string }
+  | { kind: 'transmission'; name: string; url: string; downloadDir?: string }
+  | { kind: 'deluge'; name: string; url: string; downloadLocation?: string }
+  /** rTorrent cannot use webseeds: `directory` must be where the `dir` webseed writes, as rTorrent sees it. */
+  | { kind: 'rtorrent'; name: string; url: string; directory: string }
+
+export interface PublishConfig {
+  /** Tracker announce URLs, in order. The shell adds none of its own, so these are what readers find peers with (plus DHT). */
+  trackers: string[]
+  webseed: WebSeedConfig
+  seedboxes: SeedBoxConfig[]
+  /** Announce once a box has the whole file; past this, announce on a reachable webseed alone. */
+  seedTimeoutMs: number
+  /** Only publish stories emitted within this many days — turning publishing on must not flood the relay with the archive. */
+  backlogDays: number
+}
+
+export interface AboutConfig {
+  /** Shown as the memo's From line. */
+  name: string
+  /** A paragraph about the bot, before the generated how-to. */
+  description?: string
+  /** Re-post the about memo when it is older than this, so new readers of the relay see it. */
+  repostDays: number
 }
 
 export interface MediaConfig {
@@ -86,12 +122,25 @@ export interface Config {
   retries: number
   media: MediaConfig
   limits: LimitsConfig
+  /** Publishing to BitTorrent; off when absent. */
+  publish?: PublishConfig
+  /** Relays to announce on and to read sealed subscribe letters from. */
+  relays: string[]
+  /** JSON file with seed box and webseed credentials (0600). */
+  secretsFile: string
+  about: AboutConfig
+  /** 'subscribed': only scrape sites somebody has subscribed to (or marked `always`). */
+  scrape: 'all' | 'subscribed'
+  /** `serve`'s scrape interval. */
+  serveEveryMs: number
   sites: Site[]
 }
 
-export type UserConfig = Partial<Omit<Config, 'sites' | 'media' | 'limits'>> & {
+export type UserConfig = Partial<Omit<Config, 'sites' | 'media' | 'limits' | 'publish' | 'about'>> & {
   media?: Partial<MediaConfig>
   limits?: Partial<LimitsConfig>
+  publish?: Partial<PublishConfig>
+  about?: Partial<AboutConfig>
   sites: Site[]
 }
 
@@ -134,8 +183,15 @@ export const DEFAULTS: Omit<Config, 'sites'> = {
   maxHtmlBytes: 3 * MiB,
   retries: 1,
   media: DEFAULT_MEDIA,
-  limits: DEFAULT_LIMITS
+  limits: DEFAULT_LIMITS,
+  relays: [],
+  secretsFile: '$XDG_CONFIG_HOME/newsread/secrets.json',
+  about: { name: 'newsread', repostDays: 7 },
+  scrape: 'all',
+  serveEveryMs: 10 * 60_000
 }
+
+export const DEFAULT_SEED_TIMEOUT_MS = 10 * 60_000
 
 export class ConfigError extends Error {
   override name = 'ConfigError'
@@ -154,14 +210,49 @@ export function defineConfig(user: UserConfig): Config {
     if (!Array.isArray(s.feeds)) throw new ConfigError(`site ${s.id}: feeds must be an array`)
     for (const f of s.feeds) if (!isHttpUrl(f)) throw new ConfigError(`site ${s.id}: feed is not an http(s) URL: ${f}`)
   }
-  const { sites, media, limits, ...rest } = user
+  for (const r of user.relays ?? []) if (!/^wss?:\/\/[^\s]+$/.test(r)) throw new ConfigError(`relay is not a ws(s) URL: ${r}`)
+  if (user.scrape !== undefined && user.scrape !== 'all' && user.scrape !== 'subscribed') throw new ConfigError(`scrape must be 'all' or 'subscribed'`)
+  const { sites, media, limits, publish, about, ...rest } = user
   return {
     ...DEFAULTS,
     ...stripUndefined(rest),
     media: { ...DEFAULT_MEDIA, ...stripUndefined(media ?? {}) },
     limits: { ...DEFAULT_LIMITS, ...stripUndefined(limits ?? {}) },
+    about: { ...DEFAULTS.about, ...stripUndefined(about ?? {}) },
+    ...(publish ? { publish: checkPublish(publish) } : {}),
     sites
   }
+}
+
+const BOX_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+
+function checkPublish(p: Partial<PublishConfig>): PublishConfig {
+  const trackers = p.trackers ?? []
+  for (const t of trackers) if (!/^(udp|https?|wss?):\/\/\S+$/.test(t)) throw new ConfigError(`publish: tracker is not a udp/http/ws URL: ${t}`)
+  if (!trackers.length) throw new ConfigError('publish: at least one tracker is needed — the shell adds none of its own')
+  const seedboxes = p.seedboxes ?? []
+  const names = new Set<string>()
+  for (const b of seedboxes) {
+    if (!b || !['qbittorrent', 'transmission', 'deluge', 'rtorrent'].includes(b.kind)) throw new ConfigError(`publish: unknown seed box kind ${JSON.stringify((b as { kind?: unknown })?.kind)}`)
+    if (!BOX_NAME.test(b.name ?? '')) throw new ConfigError(`publish: seed box name must match ${BOX_NAME}: ${JSON.stringify(b.name)}`)
+    if (names.has(b.name)) throw new ConfigError(`publish: duplicate seed box name ${b.name}`)
+    names.add(b.name)
+    if (!isHttpUrl(b.url)) throw new ConfigError(`publish: seed box ${b.name}: url is not http(s)`)
+    if (b.kind === 'rtorrent') {
+      if (!b.directory) throw new ConfigError(`publish: seed box ${b.name}: rtorrent needs \`directory\``)
+      if (p.webseed?.kind !== 'dir') throw new ConfigError(`publish: seed box ${b.name}: rtorrent cannot use webseeds, so it needs a 'dir' webseed writing into its directory`)
+    }
+  }
+  // The webseed is how the bytes reach the boxes at all (they fetch from it as
+  // from a peer), and what keeps a pointer honest when no box has finished.
+  const w = p.webseed
+  if (!w) throw new ConfigError('publish: needs a webseed — it is how the seed boxes get the bytes')
+  if (w.kind !== 'dir' && w.kind !== 's3') throw new ConfigError(`publish: unknown webseed kind ${JSON.stringify((w as { kind?: unknown }).kind)}`)
+  if (w.kind === 'dir' && (!w.dir || !isHttpUrl(w.baseUrl))) throw new ConfigError(`publish: webseed 'dir' needs dir and an http(s) baseUrl`)
+  if (w.kind === 's3' && !(isHttpUrl(w.endpoint) && w.bucket && w.region && isHttpUrl(w.publicBaseUrl))) {
+    throw new ConfigError(`publish: webseed 's3' needs endpoint, bucket, region and publicBaseUrl`)
+  }
+  return { trackers, seedboxes, seedTimeoutMs: p.seedTimeoutMs ?? DEFAULT_SEED_TIMEOUT_MS, backlogDays: p.backlogDays ?? 2, webseed: w }
 }
 
 function stripUndefined<T extends object>(o: T): Partial<T> {

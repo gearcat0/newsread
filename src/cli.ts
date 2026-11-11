@@ -4,9 +4,14 @@ import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { type Config, ConfigError, expandPath, genericSite, loadConfig, siteForUrl } from './config.js'
 import { createHttpClient } from './http.js'
-import { loadOrCreateIdentity } from './identity.js'
+import { type Identity, loadOrCreateIdentity } from './identity.js'
 import { StateStore } from './state.js'
-import { programHashHex } from './souspli.js'
+import { Bot } from './bot.js'
+import { RelayClient } from './nostr/relay.js'
+import { createPublisher } from './publish/index.js'
+import { loadSecrets } from './secrets.js'
+import { describeSites } from './subscribe.js'
+import { programHashHex, THING_KIND } from './souspli.js'
 import { type Inspection, inspectBundle } from './bundle.js'
 import { ALLOWED_MIMES } from './sniff.js'
 import { type Ctx, type Flags, type Logger, type Outcome, describe, processUrl, runSite } from './pipeline.js'
@@ -23,6 +28,14 @@ usage:
                                              archive one article now
   newsread inspect <file.thing> [--json]     admit a bundle and print what is inside
   newsread verify <dir>                      check every .thing under <dir> is a well-formed article
+
+publishing (needs \`publish\` and \`relays\` in the config):
+  newsread serve [--every 10m] [--site id]   run forever: scrape, publish to the seed boxes, announce on
+                                             the relays, keep the about memo current, answer subscribers
+  newsread publish                           one pass: stage, poll the seed boxes, announce what is ready
+  newsread inbox                             read sealed letters to this account once, answer them
+  newsread subscribers                       who is subscribed to what
+  newsread relays                            check each relay answers; print the key to trust there
 
 global options:
   --config <path>    config module (default: newsread.config.ts)
@@ -58,7 +71,7 @@ function consoleLogger(debug: boolean): Logger {
   }
 }
 
-async function createContext(config: Config, flags: Flags): Promise<{ ctx: Ctx; address: string; created: boolean }> {
+async function createContext(config: Config, flags: Flags): Promise<{ ctx: Ctx; address: string; created: boolean; identity: Identity }> {
   const { identity, created } = loadOrCreateIdentity(expandPath(config.identityFile))
   const ctx: Ctx = {
     config,
@@ -71,11 +84,89 @@ async function createContext(config: Config, flags: Flags): Promise<{ ctx: Ctx; 
     }),
     state: StateStore.load(expandPath(config.stateFile)),
     signer: identity.signer,
+    ek: identity.nostr.pub,
     now: () => new Date(),
     log: consoleLogger(flags.debug),
     flags
   }
-  return { ctx, address: identity.address, created }
+  return { ctx, address: identity.address, created, identity }
+}
+
+function createBot(ctx: Ctx, identity: Identity): Bot {
+  const cfg = ctx.config
+  const publisher = cfg.publish ? createPublisher(cfg.publish, loadSecrets(expandPath(cfg.secretsFile))) : undefined
+  return new Bot({ config: cfg, identity, state: ctx.state, log: ctx.log, ...(publisher ? { publisher } : {}) })
+}
+
+/** `10m`, `90s`, `1h`, or plain milliseconds. */
+export function parseDuration(s: string): number | undefined {
+  const m = /^(\d+(?:\.\d+)?)(ms|s|m|h)?$/.exec(s.trim())
+  if (!m) return undefined
+  const n = Number(m[1])
+  const unit = m[2] ?? 'ms'
+  return Math.round(n * (unit === 'h' ? 3_600_000 : unit === 'm' ? 60_000 : unit === 's' ? 1000 : 1))
+}
+
+function needRelays(config: Config): boolean {
+  if (config.relays.length) return true
+  console.error('no relays configured — add `relays: [\'wss://…\']` to the config')
+  return false
+}
+
+/** Run until SIGINT/SIGTERM. Scrape ticks and publish polls never overlap themselves. */
+async function serve(ctx: Ctx, bot: Bot, everyMs: number, onlySite: string | undefined): Promise<number> {
+  const log = ctx.log
+  let stopping = false
+  let wake: (() => void) | undefined
+  const stop = (): void => {
+    if (stopping) return
+    stopping = true
+    log.info('stopping…')
+    wake?.()
+  }
+  process.on('SIGINT', stop)
+  process.on('SIGTERM', stop)
+  const nap = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      const t = setTimeout(resolve, ms)
+      wake = () => {
+        clearTimeout(t)
+        resolve()
+      }
+    })
+
+  await bot.postAbout().catch((e: Error) => log.warn(`about memo: ${e.message}`))
+  bot.listen()
+  // Seed boxes finish downloading in seconds to minutes; poll them far more
+  // often than we scrape so an article is announced as soon as it is served.
+  const pollMs = 30_000
+  const poller = setInterval(() => {
+    bot.publishPending().catch((e: Error) => log.warn(`publish: ${e.message}`))
+  }, pollMs)
+  poller.unref()
+  let lastAbout = Date.now()
+  while (!stopping) {
+    const sites = bot.sitesToScrape().filter((s) => !onlySite || s.id === onlySite)
+    if (!sites.length) log.info('nothing to scrape (no subscribers yet, and no site is marked always)')
+    for (const site of sites) {
+      if (stopping) break
+      try {
+        await runSite(site, ctx)
+      } catch (e) {
+        log.warn(`[${site.id}] ${(e as Error).message}`)
+      }
+      await bot.publishPending().catch((e: Error) => log.warn(`publish: ${e.message}`))
+    }
+    if (Date.now() - lastAbout > 3_600_000) {
+      lastAbout = Date.now()
+      await bot.postAbout().catch((e: Error) => log.warn(`about memo: ${e.message}`))
+    }
+    if (!stopping) await nap(everyMs)
+  }
+  clearInterval(poller)
+  bot.close()
+  ctx.state.save()
+  return 0
 }
 
 export interface VerifyResult {
@@ -173,7 +264,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         'dry-run': { type: 'boolean' },
         refresh: { type: 'boolean' },
         debug: { type: 'boolean' },
-        json: { type: 'boolean' }
+        json: { type: 'boolean' },
+        every: { type: 'string' }
       }
     })
   } catch (e) {
@@ -209,9 +301,89 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
       }
       case 'whoami': {
         const config = await loadConfig(configPath)
-        const { address } = await createContext(config, flags)
+        const { address, identity } = await createContext(config, flags)
         console.log(address)
+        console.log(`nostr ${identity.nostr.pubHex}`)
         return 0
+      }
+      case 'serve': {
+        const config = await loadConfig(configPath)
+        if (!needRelays(config)) return 2
+        if (!config.publish) console.error('warn: no `publish` config — articles will be archived but not announced')
+        const everyMs = values.every !== undefined ? parseDuration(values.every) : config.serveEveryMs
+        if (everyMs === undefined || everyMs < 1000) {
+          console.error(`--every: not a duration: ${values.every}`)
+          return 2
+        }
+        const { ctx, identity } = await createContext(config, flags)
+        if (values.site && !config.sites.some((s) => s.id === values.site)) {
+          console.error(`no site with id ${JSON.stringify(values.site)}`)
+          return 2
+        }
+        console.error(`serving as ${identity.address} (nostr ${identity.nostr.pubHex}) on ${config.relays.join(', ')}`)
+        return await serve(ctx, createBot(ctx, identity), everyMs, values.site)
+      }
+      case 'publish': {
+        const config = await loadConfig(configPath)
+        if (!needRelays(config)) return 2
+        if (!config.publish) {
+          console.error('no `publish` config — see the README')
+          return 2
+        }
+        const { ctx, identity } = await createContext(config, flags)
+        const bot = createBot(ctx, identity)
+        try {
+          const n = await bot.publishPending()
+          const left = ctx.state.pendingPublish(config.relays).length
+          console.error(`${n} announced; ${left} still pending (run again, or use serve)`)
+        } finally {
+          bot.close()
+        }
+        return 0
+      }
+      case 'inbox': {
+        const config = await loadConfig(configPath)
+        if (!needRelays(config)) return 2
+        const { ctx, identity } = await createContext(config, flags)
+        const bot = createBot(ctx, identity)
+        try {
+          const outs = await bot.readInboxOnce()
+          const handled = outs.filter((o) => o.kind === 'handled')
+          for (const o of handled) if (o.kind === 'handled') console.log(`${o.action.padEnd(12)} ${o.author}`)
+          console.error(`${outs.length} event${outs.length === 1 ? '' : 's'} read, ${handled.length} request${handled.length === 1 ? '' : 's'} answered`)
+        } finally {
+          bot.close()
+        }
+        return 0
+      }
+      case 'subscribers': {
+        const config = await loadConfig(configPath)
+        const state = StateStore.load(expandPath(config.stateFile))
+        const subs = Object.entries(state.data.subscribers)
+        if (values.json) console.log(JSON.stringify(state.data.subscribers, null, 2))
+        else for (const [k, s] of subs) console.log(`0x${k}  ${describeSites(s.sites)}  (since ${new Date(s.updated * 1000).toISOString()})`)
+        console.error(`${subs.length} subscriber${subs.length === 1 ? '' : 's'}`)
+        return 0
+      }
+      case 'relays': {
+        const config = await loadConfig(configPath)
+        if (!needRelays(config)) return 2
+        const { identity } = await createContext(config, flags)
+        let bad = 0
+        for (const url of config.relays) {
+          const r = new RelayClient(url, { connectTimeoutMs: 10_000 })
+          let mine = 0
+          const res = await r.fetchStored([{ kinds: [THING_KIND], authors: [identity.nostr.pubHex], limit: 5 }], () => void mine++, 15_000)
+          r.close()
+          if (res === 'eose') console.log(`ok    ${url}  (${mine ? `has posts from this account` : 'nothing from this account yet'})`)
+          else {
+            bad++
+            console.log(`FAIL  ${url}  (no answer)`)
+          }
+        }
+        console.error(`this account's relay key: ${identity.nostr.pubHex}`)
+        console.error('on a relay from souspli/relay, add it to TRUSTED_PUBKEYS so a burst of articles is never rate-limited')
+        return bad ? 1 : 0
       }
       case 'run': {
         const config = await loadConfig(configPath)
