@@ -10,7 +10,7 @@ import { Qbittorrent } from '../src/publish/seedbox/qbittorrent.js'
 import { Transmission } from '../src/publish/seedbox/transmission.js'
 import { Deluge } from '../src/publish/seedbox/deluge.js'
 import { Rtorrent, xmlRpcCall, xmlRpcResult } from '../src/publish/seedbox/rtorrent.js'
-import { DirWebSeed, S3WebSeed, signV4 } from '../src/publish/webseed.js'
+import { DirWebSeed, S3WebSeed, SshWebSeed, shellQuote, signV4, type SshRunner } from '../src/publish/webseed.js'
 import type { FetchLike } from '../src/publish/types.js'
 
 interface Call {
@@ -212,6 +212,29 @@ describe('webseeds', () => {
     expect([...readFileSync(join(dir, 'article-01234567.thing'))]).toEqual([9, 8, 7])
     await expect(w.put('../etc/passwd', new Uint8Array(1))).rejects.toThrow(/unsafe/)
     await expect(w.put('a/b', new Uint8Array(1))).rejects.toThrow(/unsafe/)
+  })
+
+  it('ssh: one bounded ssh per file, written aside then renamed, args quoted', async () => {
+    const runs: { args: string[]; input: Uint8Array; timeoutMs: number }[] = []
+    const ssh: SshRunner = async (args, input, timeoutMs) => void runs.push({ args, input, timeoutMs })
+    const w = new SshWebSeed({ host: 'newsread@dev', dir: "/var/www/it's", baseUrl: 'https://dev.example/n/', port: 2222, ssh })
+    const url = await w.put('article-01234567.thing', new Uint8Array([9, 8, 7]))
+    expect(url).toBe('https://dev.example/n/article-01234567.thing')
+    const r = runs[0]!
+    expect([...r.input]).toEqual([9, 8, 7])
+    expect(r.timeoutMs).toBe(60_000)
+    expect(r.args).toContain('BatchMode=yes')
+    expect(r.args).toContain('ServerAliveInterval=5')
+    expect(r.args.slice(-3, -1)).toEqual(['--', 'newsread@dev'])
+    expect(r.args[r.args.indexOf('-p') + 1]).toBe('2222')
+    const cmd = r.args.at(-1)!
+    expect(cmd).toContain(`cd ${shellQuote("/var/www/it's")}`)
+    expect(cmd).toMatch(/cat > '\.article-01234567\.thing\.tmp' && mv -f '\.article-01234567\.thing\.tmp' 'article-01234567\.thing'$/)
+    await w.remove('article-01234567.thing')
+    expect(runs[1]!.args.at(-1)).toBe(`rm -f ${shellQuote("/var/www/it's/article-01234567.thing")}`)
+    await expect(w.put('../x', new Uint8Array(1))).rejects.toThrow(/unsafe/)
+    expect(() => new SshWebSeed({ host: '-oProxyCommand=x', dir: '/d', baseUrl: 'https://d', ssh })).toThrow(/bad ssh host/)
+    expect(shellQuote("a'b")).toBe(`'a'\\''b'`)
   })
 
   it('SigV4 matches the AWS test suite (get-vanilla)', () => {

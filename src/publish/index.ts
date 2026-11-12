@@ -17,7 +17,7 @@ import { Qbittorrent } from './seedbox/qbittorrent.js'
 import { Rtorrent } from './seedbox/rtorrent.js'
 import { Transmission } from './seedbox/transmission.js'
 import { type FetchLike, type SeedBox, type WebSeedStore, PublishError } from './types.js'
-import { DirWebSeed, S3WebSeed } from './webseed.js'
+import { DirWebSeed, S3WebSeed, SshWebSeed } from './webseed.js'
 
 export interface Publisher {
   webseed: WebSeedStore
@@ -36,6 +36,7 @@ export function createPublisher(cfg: PublishConfig, secrets: Secrets, fetchImpl?
   const w = cfg.webseed
   let webseed: WebSeedStore
   if (w.kind === 'dir') webseed = new DirWebSeed({ dir: w.dir, baseUrl: w.baseUrl, ...f })
+  else if (w.kind === 'ssh') webseed = new SshWebSeed({ host: w.host, dir: w.dir, baseUrl: w.baseUrl, ...(w.port ? { port: w.port } : {}), ...f })
   else {
     if (!secrets.webseed) throw new PublishError("the 's3' webseed needs webseed.accessKeyId/secretAccessKey in the secrets file")
     webseed = new S3WebSeed({ ...w, ...secrets.webseed, ...f })

@@ -12,6 +12,8 @@ export interface WebSeedStore {
   put(name: string, bytes: Uint8Array): Promise<string>
   /** True when `url` answers 200 with the expected length. */
   check(url: string, length: number): Promise<boolean>
+  /** Delete what `put` stored under `name`, where the store can. */
+  remove?(name: string): Promise<void>
 }
 
 export interface SeedBoxAddOptions {

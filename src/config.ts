@@ -60,6 +60,8 @@ export interface Site {
 export type WebSeedConfig =
   /** A directory some web server already serves at `baseUrl`. */
   | { kind: 'dir'; dir: string; baseUrl: string }
+  /** The same, on another machine, written over ssh (key auth; `host` is user@host or a ~/.ssh/config alias). */
+  | { kind: 'ssh'; host: string; dir: string; baseUrl: string; port?: number }
   /** An S3-compatible bucket. Credentials come from the secrets file. */
   | { kind: 's3'; endpoint: string; bucket: string; region: string; publicBaseUrl: string; prefix?: string }
 
@@ -68,7 +70,7 @@ export type SeedBoxConfig =
   | { kind: 'qbittorrent'; name: string; url: string; savePath?: string; category?: string }
   | { kind: 'transmission'; name: string; url: string; downloadDir?: string }
   | { kind: 'deluge'; name: string; url: string; downloadLocation?: string }
-  /** rTorrent cannot use webseeds: `directory` must be where the `dir` webseed writes, as rTorrent sees it. */
+  /** rTorrent cannot use webseeds: `directory` must be where the `dir` or `ssh` webseed writes, as rTorrent sees it. */
   | { kind: 'rtorrent'; name: string; url: string; directory: string }
 
 export interface PublishConfig {
@@ -240,15 +242,18 @@ function checkPublish(p: Partial<PublishConfig>): PublishConfig {
     if (!isHttpUrl(b.url)) throw new ConfigError(`publish: seed box ${b.name}: url is not http(s)`)
     if (b.kind === 'rtorrent') {
       if (!b.directory) throw new ConfigError(`publish: seed box ${b.name}: rtorrent needs \`directory\``)
-      if (p.webseed?.kind !== 'dir') throw new ConfigError(`publish: seed box ${b.name}: rtorrent cannot use webseeds, so it needs a 'dir' webseed writing into its directory`)
+      if (p.webseed?.kind !== 'dir' && p.webseed?.kind !== 'ssh') throw new ConfigError(`publish: seed box ${b.name}: rtorrent cannot use webseeds, so it needs a 'dir' or 'ssh' webseed writing into its directory`)
     }
   }
   // The webseed is how the bytes reach the boxes at all (they fetch from it as
   // from a peer), and what keeps a pointer honest when no box has finished.
   const w = p.webseed
   if (!w) throw new ConfigError('publish: needs a webseed — it is how the seed boxes get the bytes')
-  if (w.kind !== 'dir' && w.kind !== 's3') throw new ConfigError(`publish: unknown webseed kind ${JSON.stringify((w as { kind?: unknown }).kind)}`)
+  if (w.kind !== 'dir' && w.kind !== 'ssh' && w.kind !== 's3') throw new ConfigError(`publish: unknown webseed kind ${JSON.stringify((w as { kind?: unknown }).kind)}`)
   if (w.kind === 'dir' && (!w.dir || !isHttpUrl(w.baseUrl))) throw new ConfigError(`publish: webseed 'dir' needs dir and an http(s) baseUrl`)
+  if (w.kind === 'ssh' && (!w.host || w.host.startsWith('-') || !w.dir?.startsWith('/') || !isHttpUrl(w.baseUrl))) {
+    throw new ConfigError(`publish: webseed 'ssh' needs host, an absolute dir and an http(s) baseUrl`)
+  }
   if (w.kind === 's3' && !(isHttpUrl(w.endpoint) && w.bucket && w.region && isHttpUrl(w.publicBaseUrl))) {
     throw new ConfigError(`publish: webseed 's3' needs endpoint, bucket, region and publicBaseUrl`)
   }
