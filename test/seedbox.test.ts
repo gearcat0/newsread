@@ -11,7 +11,9 @@ import { Transmission } from '../src/publish/seedbox/transmission.js'
 import { Deluge } from '../src/publish/seedbox/deluge.js'
 import { Rtorrent, xmlRpcCall, xmlRpcResult } from '../src/publish/seedbox/rtorrent.js'
 import { DirWebSeed, S3WebSeed, SshWebSeed, shellQuote, signV4, type SshRunner } from '../src/publish/webseed.js'
-import type { FetchLike } from '../src/publish/types.js'
+import { bodySummary, failed, type FetchLike } from '../src/publish/types.js'
+import { createPublisher } from '../src/publish/index.js'
+import { defineConfig } from '../src/config.js'
 
 interface Call {
   url: string
@@ -160,6 +162,22 @@ describe('Deluge', () => {
     })
     await new Deluge({ name: 'dl', url: 'http://box', password: 'x', fetch: f }).add(META, HASH, opts)
   })
+
+  it('removing a torrent that is already gone is success; any other failure is not', async () => {
+    let present = false
+    const f = fakeFetch((c) => {
+      const { method, id } = JSON.parse(c.body as string) as { method: string; id: number }
+      if (method === 'auth.login') return json({ result: true, error: null, id }, { headers: { 'set-cookie': '_session_id=s' } })
+      if (method === 'web.connected') return json({ result: true, error: null, id })
+      // as Deluge 2.1 answers, live: an error for remove, {} for the status of an unknown hash
+      if (method === 'core.remove_torrent') return json({ result: null, error: { message: `Failure: <class 'deluge.error.InvalidTorrentError'>: torrent_id ${HASH} not in session.`, code: 4 }, id })
+      return json({ result: present ? { progress: 100 } : {}, error: null, id })
+    })
+    const d = new Deluge({ name: 'dl', url: 'http://box', password: 'x', fetch: f })
+    await d.remove(HASH)
+    present = true
+    await expect(d.remove(HASH)).rejects.toThrow(/core\.remove_torrent/)
+  })
 })
 
 describe('rTorrent', () => {
@@ -200,6 +218,56 @@ describe('rTorrent', () => {
     expect(await r.progress(HASH)).toBeNull()
     await r.add(META, HASH, opts)
     expect(await r.progress(HASH)).toBe(1)
+  })
+
+  it('erasing a torrent that is already gone is success; a fault on one still there is not', async () => {
+    let present = false
+    const f = fakeFetch((c) => {
+      const method = /<methodName>(.*?)<\/methodName>/.exec(c.body as string)![1]
+      const fault = (): Response =>
+        new Response('<methodResponse><fault><value><struct><member><name>faultString</name><value><string>Could not find info-hash.</string></value></member></struct></value></fault></methodResponse>')
+      if (method === 'd.erase' || !present) return fault()
+      return new Response('<methodResponse><params><param><value><i8>200</i8></value></param></params></methodResponse>')
+    })
+    const r = new Rtorrent({ name: 'rt', url: 'https://box/RPC2', directory: '/d', fetch: f })
+    await r.remove(HASH)
+    present = true
+    await expect(r.remove(HASH)).rejects.toThrow(/d\.erase/)
+  })
+})
+
+describe('HTTP errors', () => {
+  it("say an HTML error page's title, not its first tag", async () => {
+    const nginx = '<html>\r\n<head><title>401 Authorization Required</title></head>\r\n<body>\r\n<center><h1>401 Authorization Required</h1></center>\r\n</body>\r\n</html>\r\n'
+    expect(bodySummary(nginx)).toBe('401 Authorization Required')
+    expect(bodySummary('Fails.\nmore')).toBe('Fails.')
+    expect(bodySummary('<html><body>no title</body></html>')).toBe('')
+    expect(bodySummary('')).toBe('')
+    await expect(failed('rt: d.size_bytes', new Response(nginx, { status: 401 }))).rejects.toThrow('rt: d.size_bytes: HTTP 401 — 401 Authorization Required')
+  })
+
+  it('a box run without a login says so when it is asked for one', async () => {
+    const f = fakeFetch(() => new Response('<html><head><title>401 Authorization Required</title></head></html>', { status: 401 }))
+    const pub = createPublisher(
+      defineConfig({
+        sites: [],
+        publish: {
+          trackers: ['udp://t:1/announce'],
+          webseed: { kind: 'dir', dir: '/d', baseUrl: 'https://w' },
+          seedboxes: [
+            { kind: 'rtorrent', name: 'rt', url: 'http://dev:8000/RPC2', directory: '/d' },
+            { kind: 'rtorrent', name: 'rt2', url: 'http://dev:8001/RPC2', directory: '/d' }
+          ]
+        }
+      }).publish!,
+      { file: '/s.json', seedboxes: { rt2: { username: 'u', password: 'p' } } },
+      f
+    )
+    await expect(pub.boxes[0]!.progress(HASH)).rejects.toThrow(
+      'rt: d.size_bytes: HTTP 401 — 401 Authorization Required (no seedboxes.rt entry in /s.json, so no login was sent)'
+    )
+    // with an entry, a 401 is just a wrong login
+    await expect(pub.boxes[1]!.progress(HASH)).rejects.toThrow(/HTTP 401 — 401 Authorization Required$/)
   })
 })
 

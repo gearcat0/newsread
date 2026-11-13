@@ -42,20 +42,54 @@ export function createPublisher(cfg: PublishConfig, secrets: Secrets, fetchImpl?
     webseed = new S3WebSeed({ ...w, ...secrets.webseed, ...f })
   }
   const boxes = cfg.seedboxes.map((b): SeedBox => {
+    // qBittorrent and Deluge always ask for a password. Without this check a
+    // name that doesn't match its secrets entry logs in with '' and comes back
+    // as "login refused", which reads like a wrong password.
+    if ((b.kind === 'qbittorrent' || b.kind === 'deluge') && secrets.seedboxes[b.name]?.password === undefined) {
+      const have = Object.keys(secrets.seedboxes)
+      throw new PublishError(
+        `seed box ${b.name} (${b.kind}) needs a password, but ${secrets.file ?? 'the secrets file'} has no seedboxes.${b.name}.password` +
+          ` (it has ${have.length ? have.map((n) => JSON.stringify(n)).join(', ') : 'no seed box entries'})`
+      )
+    }
     const s = secrets.seedboxes[b.name] ?? {}
     const auth = { ...(s.username !== undefined ? { username: s.username } : {}), ...(s.password !== undefined ? { password: s.password } : {}) }
-    switch (b.kind) {
-      case 'qbittorrent':
-        return new Qbittorrent({ ...b, username: s.username ?? 'admin', password: s.password ?? '', ...f })
-      case 'transmission':
-        return new Transmission({ ...b, ...auth, ...f })
-      case 'deluge':
-        return new Deluge({ ...b, password: s.password ?? '', ...f })
-      case 'rtorrent':
-        return new Rtorrent({ ...b, ...auth, ...f })
-    }
+    const box = ((): SeedBox => {
+      switch (b.kind) {
+        case 'qbittorrent':
+          return new Qbittorrent({ ...b, username: s.username ?? 'admin', password: s.password ?? '', ...f })
+        case 'transmission':
+          return new Transmission({ ...b, ...auth, ...f })
+        case 'deluge':
+          return new Deluge({ ...b, password: s.password ?? '', ...f })
+        case 'rtorrent':
+          return new Rtorrent({ ...b, ...auth, ...f })
+      }
+    })()
+    // Transmission and rTorrent may run without a login, so a missing entry is
+    // allowed — but if the box then asks for one, say why none was sent.
+    return secrets.seedboxes[b.name] ? box : withAuthHint(box, `no seedboxes.${b.name} entry in ${secrets.file ?? 'the secrets file'}, so no login was sent`)
   })
   return { webseed, boxes, trackers: cfg.trackers, seedTimeoutMs: cfg.seedTimeoutMs }
+}
+
+/** Append `hint` to the errors of `box` that are an HTTP 401. */
+export function withAuthHint(box: SeedBox, hint: string): SeedBox {
+  const wrap = async <T>(p: Promise<T>): Promise<T> => {
+    try {
+      return await p
+    } catch (e) {
+      if (e instanceof Error && /: HTTP 401\b/.test(e.message)) throw new PublishError(`${e.message} (${hint})`)
+      throw e
+    }
+  }
+  return {
+    name: box.name,
+    kind: box.kind,
+    add: (m, h, o) => wrap(box.add(m, h, o)),
+    progress: (h) => wrap(box.progress(h)),
+    remove: (h) => wrap(box.remove(h))
+  }
 }
 
 export interface StageInput {

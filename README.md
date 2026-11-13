@@ -212,8 +212,23 @@ webseed did not answer, the login was refused, or the box is stuck at 0%. Stuck
 at 0% almost always means the box cannot reach the webseed URL, or the client
 queued or stopped the torrent.
 
-Live-tested against: qBittorrent 4.6.3. The other adapters are so far tested
-only against each API's documented request and response shapes.
+Live-tested against qBittorrent 4.6.3, Transmission 4.0.5, Deluge 2.1.2
+(libtorrent 2.0.10) and rTorrent 0.9.8 behind nginx. Each passed with a 300 KB
+and a 5 MiB file, a repeated add, and a repeated remove.
+
+Things that went wrong while setting these up, and what newsread now says:
+
+- A box name that doesn't match its `secrets.json` entry. qBittorrent and
+  Deluge stop with `seed box <name> needs a password, but <file> has no
+  seedboxes.<name>.password (it has …)`. Transmission and rTorrent can run
+  without a login, so for them a 401 gets `(no seedboxes.<name> entry …, so no
+  login was sent)` added.
+- A Deluge password copied from `web.conf`. That is `pwd_sha1`, a salted hash;
+  the Web UI wants the password itself.
+- A JSON slip in `secrets.json`. The error gives the line and column, never the
+  file's contents.
+- rTorrent behind nginx answering 403 to a correct login. nginx can't open its
+  `auth_basic_user_file`; check the name and that `www-data` can read it.
 
 ## What survives, what does not
 

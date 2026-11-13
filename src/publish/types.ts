@@ -41,10 +41,19 @@ export class PublishError extends Error {
 
 export const toBase64 = (b: Uint8Array): string => Buffer.from(b.buffer, b.byteOffset, b.byteLength).toString('base64')
 
-/** Throw a PublishError carrying the response body's first line, for logs. */
+/** What a response body says, in one line: an HTML error page's <title>
+ *  (nginx: "401 Authorization Required"), otherwise its first line. */
+export function bodySummary(text: string): string {
+  const title = /<title[^>]*>([^<]*)<\/title>/i.exec(text)?.[1]?.trim()
+  if (title) return title.slice(0, 200)
+  const first = text.split('\n').find((l) => l.trim()) ?? ''
+  return /^\s*</.test(first) ? '' : first.trim().slice(0, 200)
+}
+
+/** Throw a PublishError carrying what the response body says, for logs. */
 export async function failed(what: string, res: Response): Promise<never> {
-  const text = await res.text().catch(() => '')
-  throw new PublishError(`${what}: HTTP ${res.status}${text ? ` — ${text.split('\n')[0]!.slice(0, 200)}` : ''}`)
+  const said = bodySummary(await res.text().catch(() => ''))
+  throw new PublishError(`${what}: HTTP ${res.status}${said ? ` — ${said}` : ''}`)
 }
 
 /** Basic-auth header value. */

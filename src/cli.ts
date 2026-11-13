@@ -10,7 +10,8 @@ import { Bot } from './bot.js'
 import { RelayClient } from './nostr/relay.js'
 import { checkSeedBox } from './publish/check.js'
 import { createPublisher } from './publish/index.js'
-import { loadSecrets } from './secrets.js'
+import { PublishError } from './publish/types.js'
+import { loadSecrets, SecretsError } from './secrets.js'
 import { describeSites } from './subscribe.js'
 import { programHashHex, THING_KIND } from './souspli.js'
 import { type Inspection, inspectBundle } from './bundle.js'
@@ -498,6 +499,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
   } catch (e) {
     if (e instanceof ConfigError) console.error(`config: ${e.message}`)
+    // Setup problems the message already explains; a stack would only bury it.
+    else if (e instanceof PublishError || e instanceof SecretsError) console.error(`error: ${e.message}`)
     else console.error(`error: ${(e as Error).stack ?? (e as Error).message}`)
     return 1
   }
