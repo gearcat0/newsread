@@ -34,6 +34,8 @@ export interface Ctx {
   http: HttpClient
   state: StateStore
   signer: Signer
+  /** Bound into every article as Author.ek (the identity's Nostr key). */
+  ek?: Uint8Array
   now: () => Date
   log: Logger
   flags: Flags
@@ -123,7 +125,7 @@ export async function processUrl(url: string, site: Site, ctx: Ctx, hint?: FeedH
 
     const chain: Chain = prev ? { path: prev.path, seq: prev.seq + 1, prev: prev.envelopeHash } : { path: storyPath(canonical), seq: 1 }
     const created = Math.floor(ctx.now().getTime() / 1000)
-    const built = await buildArticle(ctx.signer, flat.args, flat.attachments, chain, created, cfg.limits.hardArgsBytes)
+    const built = await buildArticle(ctx.signer, flat.args, flat.attachments, chain, created, cfg.limits.hardArgsBytes, ctx.ek)
 
     const title = flat.args.title
     if (ctx.flags.dryRun) {

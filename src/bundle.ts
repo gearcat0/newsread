@@ -1,6 +1,6 @@
 // Build, sign and self-verify an article bundle; inspect existing ones.
 import {
-  admitBundle, buildBundle, cborToJs, chainInfo, encode, fromHex, hash, jsToCbor, loadProgram, parseBundle,
+  admitBundle, buildBundle, cborToJs, chainInfo, encode, fromHex, hash, jsToCbor, loadProgram, NOSTR_ENC_SCHEME, parseBundle,
   programHashHex, toHex, type Signer
 } from './souspli.js'
 import type { ArticleArgs } from './args.js'
@@ -46,7 +46,11 @@ export async function buildArticle(
   attachments: Attachments,
   chain: Chain,
   created: number,
-  hardArgsBytes: number
+  hardArgsBytes: number,
+  /** The author's Nostr key, bound into the signed envelope as Author.ek. It is
+   *  what lets a reader seal a letter to us ("Write privately"), and how the
+   *  shell tells our own relay posts from someone relaying us. */
+  ek?: Uint8Array
 ): Promise<BuiltArticle> {
   const cborArgs = jsToCbor(args)
   const argsBytes = encode(cborArgs).length
@@ -60,7 +64,8 @@ export async function buildArticle(
     created,
     path: chain.path,
     seq: chain.seq,
-    ...(chain.prev ? { prev: fromHex(chain.prev) } : {})
+    ...(chain.prev ? { prev: fromHex(chain.prev) } : {}),
+    ...(ek ? { enc: { e: NOSTR_ENC_SCHEME, ek } } : {})
   })
   const r = admitBundle(parseBundle(tar))
   if (r.status !== 'valid') throw new BuildError(`self-admission failed: ${r.status === 'invalid' ? r.reason : r.status}`)
