@@ -8,8 +8,10 @@ import { type Identity, loadOrCreateIdentity } from './identity.js'
 import { StateStore } from './state.js'
 import { Bot } from './bot.js'
 import { RelayClient } from './nostr/relay.js'
+import { checkSeedBox } from './publish/check.js'
 import { createPublisher } from './publish/index.js'
-import { loadSecrets } from './secrets.js'
+import { PublishError } from './publish/types.js'
+import { loadSecrets, SecretsError } from './secrets.js'
 import { describeSites } from './subscribe.js'
 import { programHashHex, THING_KIND } from './souspli.js'
 import { type Inspection, inspectBundle } from './bundle.js'
@@ -36,6 +38,9 @@ publishing (needs \`publish\` and \`relays\` in the config):
   newsread inbox                             read sealed letters to this account once, answer them
   newsread subscribers                       who is subscribed to what
   newsread relays                            check each relay answers; print the key to trust there
+  newsread seedbox-check <box> [--timeout 3m] [--size 300k] [--keep]
+                                             push a throwaway file through the webseed to one seed
+                                             box and wait for 100% (nothing is announced)
 
 global options:
   --config <path>    config module (default: newsread.config.ts)
@@ -265,7 +270,10 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         refresh: { type: 'boolean' },
         debug: { type: 'boolean' },
         json: { type: 'boolean' },
-        every: { type: 'string' }
+        every: { type: 'string' },
+        timeout: { type: 'string' },
+        size: { type: 'string' },
+        keep: { type: 'boolean' }
       }
     })
   } catch (e) {
@@ -385,6 +393,34 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         console.error('on a relay from souspli/relay, add it to TRUSTED_PUBKEYS so a burst of articles is never rate-limited')
         return bad ? 1 : 0
       }
+      case 'seedbox-check': {
+        const config = await loadConfig(configPath)
+        if (!config.publish) {
+          console.error('no `publish` config — see the README')
+          return 2
+        }
+        const want = rest[0]
+        const publisher = createPublisher(config.publish, loadSecrets(expandPath(config.secretsFile)))
+        const box = publisher.boxes.find((b) => b.name === want)
+        if (!box) {
+          console.error(`no seed box ${JSON.stringify(want ?? '')} — configured: ${publisher.boxes.map((b) => b.name).join(', ') || 'none'}`)
+          return 2
+        }
+        const timeoutMs = parseDuration(values.timeout ?? '3m')
+        const size = /^(\d+)(k|m)?$/i.exec(values.size ?? '300k')
+        if (timeoutMs === undefined || !size) {
+          console.error('bad --timeout or --size')
+          return 2
+        }
+        const bytes = Number(size[1]) * (size[2]?.toLowerCase() === 'm' ? 1 << 20 : size[2] ? 1024 : 1)
+        if (bytes < 1 || bytes > 64 << 20) {
+          console.error('--size must be between 1 byte and 64m')
+          return 2
+        }
+        const r = await checkSeedBox(publisher, box, { bytes, timeoutMs, keep: !!values.keep, say: (l) => console.log(l) })
+        console.log(r.ok ? `ok    ${box.name} (${box.kind})` : `FAIL  ${box.name} (${box.kind})`)
+        return r.ok ? 0 : 1
+      }
       case 'run': {
         const config = await loadConfig(configPath)
         const { ctx } = await createContext(config, flags)
@@ -463,6 +499,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
     }
   } catch (e) {
     if (e instanceof ConfigError) console.error(`config: ${e.message}`)
+    // Setup problems the message already explains; a stack would only bury it.
+    else if (e instanceof PublishError || e instanceof SecretsError) console.error(`error: ${e.message}`)
     else console.error(`error: ${(e as Error).stack ?? (e as Error).message}`)
     return 1
   }

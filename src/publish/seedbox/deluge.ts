@@ -89,6 +89,12 @@ export class Deluge implements SeedBox {
   }
 
   async remove(infohash: string): Promise<void> {
-    await this.#call('core.remove_torrent', [infohash, true])
+    try {
+      await this.#call('core.remove_torrent', [infohash, true])
+    } catch (e) {
+      // Already gone ("InvalidTorrentError: torrent_id … not in session") is
+      // what we wanted, as with the other clients.
+      if ((await this.progress(infohash)) !== null) throw e
+    }
   }
 }

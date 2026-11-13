@@ -82,6 +82,7 @@ export class Rtorrent implements SeedBox {
 
   async remove(infohash: string): Promise<void> {
     const r = await this.#call('d.erase', [infohash.toUpperCase()])
-    if ('fault' in r) throw new PublishError(`${this.name}: d.erase: ${r.fault}`)
+    // Already gone is what we wanted, as with the other clients.
+    if ('fault' in r && (await this.progress(infohash)) !== null) throw new PublishError(`${this.name}: d.erase: ${r.fault}`)
   }
 }

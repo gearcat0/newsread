@@ -10,8 +10,10 @@ import { Qbittorrent } from '../src/publish/seedbox/qbittorrent.js'
 import { Transmission } from '../src/publish/seedbox/transmission.js'
 import { Deluge } from '../src/publish/seedbox/deluge.js'
 import { Rtorrent, xmlRpcCall, xmlRpcResult } from '../src/publish/seedbox/rtorrent.js'
-import { DirWebSeed, S3WebSeed, signV4 } from '../src/publish/webseed.js'
-import type { FetchLike } from '../src/publish/types.js'
+import { DirWebSeed, S3WebSeed, SshWebSeed, shellQuote, signV4, type SshRunner } from '../src/publish/webseed.js'
+import { bodySummary, failed, type FetchLike } from '../src/publish/types.js'
+import { createPublisher } from '../src/publish/index.js'
+import { defineConfig } from '../src/config.js'
 
 interface Call {
   url: string
@@ -160,6 +162,22 @@ describe('Deluge', () => {
     })
     await new Deluge({ name: 'dl', url: 'http://box', password: 'x', fetch: f }).add(META, HASH, opts)
   })
+
+  it('removing a torrent that is already gone is success; any other failure is not', async () => {
+    let present = false
+    const f = fakeFetch((c) => {
+      const { method, id } = JSON.parse(c.body as string) as { method: string; id: number }
+      if (method === 'auth.login') return json({ result: true, error: null, id }, { headers: { 'set-cookie': '_session_id=s' } })
+      if (method === 'web.connected') return json({ result: true, error: null, id })
+      // as Deluge 2.1 answers, live: an error for remove, {} for the status of an unknown hash
+      if (method === 'core.remove_torrent') return json({ result: null, error: { message: `Failure: <class 'deluge.error.InvalidTorrentError'>: torrent_id ${HASH} not in session.`, code: 4 }, id })
+      return json({ result: present ? { progress: 100 } : {}, error: null, id })
+    })
+    const d = new Deluge({ name: 'dl', url: 'http://box', password: 'x', fetch: f })
+    await d.remove(HASH)
+    present = true
+    await expect(d.remove(HASH)).rejects.toThrow(/core\.remove_torrent/)
+  })
 })
 
 describe('rTorrent', () => {
@@ -201,6 +219,56 @@ describe('rTorrent', () => {
     await r.add(META, HASH, opts)
     expect(await r.progress(HASH)).toBe(1)
   })
+
+  it('erasing a torrent that is already gone is success; a fault on one still there is not', async () => {
+    let present = false
+    const f = fakeFetch((c) => {
+      const method = /<methodName>(.*?)<\/methodName>/.exec(c.body as string)![1]
+      const fault = (): Response =>
+        new Response('<methodResponse><fault><value><struct><member><name>faultString</name><value><string>Could not find info-hash.</string></value></member></struct></value></fault></methodResponse>')
+      if (method === 'd.erase' || !present) return fault()
+      return new Response('<methodResponse><params><param><value><i8>200</i8></value></param></params></methodResponse>')
+    })
+    const r = new Rtorrent({ name: 'rt', url: 'https://box/RPC2', directory: '/d', fetch: f })
+    await r.remove(HASH)
+    present = true
+    await expect(r.remove(HASH)).rejects.toThrow(/d\.erase/)
+  })
+})
+
+describe('HTTP errors', () => {
+  it("say an HTML error page's title, not its first tag", async () => {
+    const nginx = '<html>\r\n<head><title>401 Authorization Required</title></head>\r\n<body>\r\n<center><h1>401 Authorization Required</h1></center>\r\n</body>\r\n</html>\r\n'
+    expect(bodySummary(nginx)).toBe('401 Authorization Required')
+    expect(bodySummary('Fails.\nmore')).toBe('Fails.')
+    expect(bodySummary('<html><body>no title</body></html>')).toBe('')
+    expect(bodySummary('')).toBe('')
+    await expect(failed('rt: d.size_bytes', new Response(nginx, { status: 401 }))).rejects.toThrow('rt: d.size_bytes: HTTP 401 — 401 Authorization Required')
+  })
+
+  it('a box run without a login says so when it is asked for one', async () => {
+    const f = fakeFetch(() => new Response('<html><head><title>401 Authorization Required</title></head></html>', { status: 401 }))
+    const pub = createPublisher(
+      defineConfig({
+        sites: [],
+        publish: {
+          trackers: ['udp://t:1/announce'],
+          webseed: { kind: 'dir', dir: '/d', baseUrl: 'https://w' },
+          seedboxes: [
+            { kind: 'rtorrent', name: 'rt', url: 'http://dev:8000/RPC2', directory: '/d' },
+            { kind: 'rtorrent', name: 'rt2', url: 'http://dev:8001/RPC2', directory: '/d' }
+          ]
+        }
+      }).publish!,
+      { file: '/s.json', seedboxes: { rt2: { username: 'u', password: 'p' } } },
+      f
+    )
+    await expect(pub.boxes[0]!.progress(HASH)).rejects.toThrow(
+      'rt: d.size_bytes: HTTP 401 — 401 Authorization Required (no seedboxes.rt entry in /s.json, so no login was sent)'
+    )
+    // with an entry, a 401 is just a wrong login
+    await expect(pub.boxes[1]!.progress(HASH)).rejects.toThrow(/HTTP 401 — 401 Authorization Required$/)
+  })
 })
 
 describe('webseeds', () => {
@@ -212,6 +280,29 @@ describe('webseeds', () => {
     expect([...readFileSync(join(dir, 'article-01234567.thing'))]).toEqual([9, 8, 7])
     await expect(w.put('../etc/passwd', new Uint8Array(1))).rejects.toThrow(/unsafe/)
     await expect(w.put('a/b', new Uint8Array(1))).rejects.toThrow(/unsafe/)
+  })
+
+  it('ssh: one bounded ssh per file, written aside then renamed, args quoted', async () => {
+    const runs: { args: string[]; input: Uint8Array; timeoutMs: number }[] = []
+    const ssh: SshRunner = async (args, input, timeoutMs) => void runs.push({ args, input, timeoutMs })
+    const w = new SshWebSeed({ host: 'newsread@dev', dir: "/var/www/it's", baseUrl: 'https://dev.example/n/', port: 2222, ssh })
+    const url = await w.put('article-01234567.thing', new Uint8Array([9, 8, 7]))
+    expect(url).toBe('https://dev.example/n/article-01234567.thing')
+    const r = runs[0]!
+    expect([...r.input]).toEqual([9, 8, 7])
+    expect(r.timeoutMs).toBe(60_000)
+    expect(r.args).toContain('BatchMode=yes')
+    expect(r.args).toContain('ServerAliveInterval=5')
+    expect(r.args.slice(-3, -1)).toEqual(['--', 'newsread@dev'])
+    expect(r.args[r.args.indexOf('-p') + 1]).toBe('2222')
+    const cmd = r.args.at(-1)!
+    expect(cmd).toContain(`cd ${shellQuote("/var/www/it's")}`)
+    expect(cmd).toMatch(/cat > '\.article-01234567\.thing\.tmp' && mv -f '\.article-01234567\.thing\.tmp' 'article-01234567\.thing'$/)
+    await w.remove('article-01234567.thing')
+    expect(runs[1]!.args.at(-1)).toBe(`rm -f ${shellQuote("/var/www/it's/article-01234567.thing")}`)
+    await expect(w.put('../x', new Uint8Array(1))).rejects.toThrow(/unsafe/)
+    expect(() => new SshWebSeed({ host: '-oProxyCommand=x', dir: '/d', baseUrl: 'https://d', ssh })).toThrow(/bad ssh host/)
+    expect(shellQuote("a'b")).toBe(`'a'\\''b'`)
   })
 
   it('SigV4 matches the AWS test suite (get-vanilla)', () => {

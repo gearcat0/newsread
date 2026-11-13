@@ -58,6 +58,10 @@ describe('publish, relays and scrape config', () => {
     expect(
       p({ webseed: { kind: 's3', endpoint: 'https://e', bucket: 'b', region: 'auto', publicBaseUrl: 'https://p' }, seedboxes: [{ kind: 'rtorrent', name: 'rt', url: 'http://x', directory: '/d' }] })
     ).toThrow(/rtorrent cannot use webseeds/)
+    const ssh = { kind: 'ssh', host: 'u@h', dir: '/srv/www', baseUrl: 'https://h/w' }
+    expect(p({ webseed: ssh, seedboxes: [{ kind: 'rtorrent', name: 'rt', url: 'http://x', directory: '/srv/www' }] })()).toBeDefined()
+    expect(p({ webseed: { ...ssh, dir: 'relative' } })).toThrow(/ssh/)
+    expect(p({ webseed: { ...ssh, host: '-oProxyCommand=x' } })).toThrow(/ssh/)
     expect(() => defineConfig({ sites, relays: ['https://not-ws'] })).toThrow(/ws\(s\)/)
     expect(() => defineConfig({ sites, scrape: 'some' as 'all' })).toThrow(/scrape/)
   })

@@ -145,6 +145,9 @@ export default defineConfig({
     trackers: ['udp://tracker.example.org:6969/announce', 'udp://tracker.opentrackr.org:1337/announce'],
     // where the bytes are served from: a directory a web server serves…
     webseed: { kind: 'dir', dir: '/srv/www/things', baseUrl: 'https://seed.example.org/things' },
+    // …or such a directory on another machine, written over ssh (key auth, no prompts;
+    // one bounded ssh per file, so a dropped link fails the put rather than hanging):
+    // webseed: { kind: 'ssh', host: 'newsread@seed', dir: '/srv/www/things', baseUrl: 'https://seed.example.org/things' },
     // …or an S3-compatible bucket (R2, B2, MinIO, AWS) with a public URL:
     // webseed: { kind: 's3', endpoint: 'https://<acct>.r2.cloudflarestorage.com', bucket: 'things',
     //            region: 'auto', publicBaseUrl: 'https://seed.example.org' },
@@ -152,7 +155,7 @@ export default defineConfig({
       { kind: 'qbittorrent', name: 'box1', url: 'http://box1:8080', savePath: '/data/things' },
       { kind: 'transmission', name: 'box2', url: 'http://box2:9091/transmission/rpc' },
       { kind: 'deluge', name: 'box3', url: 'http://box3:8112' },
-      // rTorrent cannot download from webseeds: point it at the `dir` webseed's directory
+      // rTorrent cannot download from webseeds: point it at the `dir` or `ssh` webseed's directory
       { kind: 'rtorrent', name: 'box4', url: 'https://box4/RPC2', directory: '/srv/www/things' }
     ],
     // seedTimeoutMs: 600000,   announce on the webseed alone if no box finishes by then
@@ -198,10 +201,34 @@ resumes where it stopped.
 
 ### Checking a seed box
 
-The four adapters are tested against each API's documented request and response
-shapes, not against live clients. Before relying on one, run
-`newsread publish` with that box alone configured, and check that the box shows the
-torrent at 100%.
+```sh
+pnpm newsread seedbox-check box1 [--timeout 3m] [--size 300k] [--keep]
+```
+
+This pushes a throwaway file through the same path a letter takes: onto the
+webseed, into a torrent, onto that one box, and on to 100%. Then it removes both,
+unless you pass `--keep`. Nothing is announced. Each failure names its step: the
+webseed did not answer, the login was refused, or the box is stuck at 0%. Stuck
+at 0% almost always means the box cannot reach the webseed URL, or the client
+queued or stopped the torrent.
+
+Live-tested against qBittorrent 4.6.3, Transmission 4.0.5, Deluge 2.1.2
+(libtorrent 2.0.10) and rTorrent 0.9.8 behind nginx. Each passed with a 300 KB
+and a 5 MiB file, a repeated add, and a repeated remove.
+
+Things that went wrong while setting these up, and what newsread now says:
+
+- A box name that doesn't match its `secrets.json` entry. qBittorrent and
+  Deluge stop with `seed box <name> needs a password, but <file> has no
+  seedboxes.<name>.password (it has …)`. Transmission and rTorrent can run
+  without a login, so for them a 401 gets `(no seedboxes.<name> entry …, so no
+  login was sent)` added.
+- A Deluge password copied from `web.conf`. That is `pwd_sha1`, a salted hash;
+  the Web UI wants the password itself.
+- A JSON slip in `secrets.json`. The error gives the line and column, never the
+  file's contents.
+- rTorrent behind nginx answering 403 to a correct login. nginx can't open its
+  `auth_basic_user_file`; check the name and that `www-data` can read it.
 
 ## What survives, what does not
 
