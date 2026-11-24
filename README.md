@@ -151,6 +151,9 @@ export default defineConfig({
     // …or an S3-compatible bucket (R2, B2, MinIO, AWS) with a public URL:
     // webseed: { kind: 's3', endpoint: 'https://<acct>.r2.cloudflarestorage.com', bucket: 'things',
     //            region: 'auto', publicBaseUrl: 'https://seed.example.org' },
+    // Our tracker, when it tracks only what it is told to (opentracker as Ubuntu and
+    // Debian ship it). Each infohash goes on its list before a seed box announces it:
+    // whitelist: { kind: 'ssh', host: 'newsread@tracker', file: '/etc/opentracker/whitelist.txt' },
     seedboxes: [
       { kind: 'qbittorrent', name: 'box1', url: 'http://box1:8080', savePath: '/data/things' },
       { kind: 'transmission', name: 'box2', url: 'http://box2:9091/transmission/rpc' },
@@ -174,6 +177,58 @@ refuses to read it if anyone else can:
   "webseed": { "accessKeyId": "…", "secretAccessKey": "…" }
 }
 ```
+
+### The tracker
+
+Readers find seed boxes through the trackers in each torrent, and through DHT.
+The shell adds no trackers of its own. Ubuntu and Debian package opentracker
+built **whitelist-only**: it tracks only the infohashes listed in
+`/etc/opentracker/whitelist.txt`, and re-reads that file on SIGHUP. That suits
+this use, because strangers can't use it to track anything else. With
+`publish.whitelist` set, newsread adds each infohash before any box announces
+it.
+
+newsread only edits the file. Reloading is up to the tracker's machine, so
+newsread never needs the right to signal anything. A systemd path unit does
+it:
+
+```ini
+# /etc/systemd/system/opentracker-whitelist.path
+[Path]
+PathChanged=/etc/opentracker/whitelist.txt
+[Install]
+WantedBy=multi-user.target
+
+# /etc/systemd/system/opentracker-whitelist.service
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reload opentracker.service
+```
+
+Make the file writable by the account newsread logs in as, and readable by
+opentracker, for example `chown newsread:_opentracker` with mode `640`.
+`seedbox-check` exercises the whole path: it whitelists its throwaway
+torrent, then waits until each tracker lists the box as a seeder.
+
+Live-tested with Ubuntu's opentracker `0.0~git20210823.110868e-9`, over UDP
+and HTTP, against all four clients. A reload took effect before each box's
+first or second announce. What came up on the way:
+
+- **The tracker ignores config edits until it restarts.** A reload re-reads only
+  the whitelist. After changing `opentracker.conf`, restart it.
+- **Bind UDP to the public address on a machine with several.** Bound to
+  `0.0.0.0`, replies can leave from another address, and clients drop them.
+- **The package is IPv4-only.** If the tracker's hostname also has an AAAA
+  record, a client that tries IPv6 first may fail to reach the HTTP tracker.
+  Use a name with only an A record for the tracker URLs.
+- **A libtorrent client (qBittorrent, Deluge) on a machine with several
+  addresses announces once from each**, so the tracker counts one box as two
+  seeders and hands readers addresses they can't reach. Bind it to the public
+  address: in qBittorrent, Advanced → *Optional IP address to bind to*; in
+  Deluge, the incoming address.
+- **A Web UI bound to a Tailscale (or other VPN) address can fail at boot** if
+  it starts before that address exists. `net.ipv4.ip_nonlocal_bind = 1` lets
+  it bind anyway.
 
 ### The relay
 
@@ -206,11 +261,14 @@ pnpm newsread seedbox-check box1 [--timeout 3m] [--size 300k] [--keep]
 ```
 
 This pushes a throwaway file through the same path a letter takes: onto the
-webseed, into a torrent, onto that one box, and on to 100%. Then it removes both,
-unless you pass `--keep`. Nothing is announced. Each failure names its step: the
-webseed did not answer, the login was refused, or the box is stuck at 0%. Stuck
-at 0% almost always means the box cannot reach the webseed URL, or the client
-queued or stopped the torrent.
+webseed, into a torrent, onto the tracker's whitelist, onto that one box, and on
+to 100%. Then it waits until each tracker lists the box as a seeder (skip that
+with `--no-trackers`). Afterwards it removes the torrent, the files and the
+whitelist entry, unless you pass `--keep`. Nothing is posted to a relay. Each
+failure names its step: the webseed did not answer, the login was refused, the
+box is stuck at 0%, or a tracker never listed it. Stuck at 0% almost always
+means the box cannot reach the webseed URL, or the client queued or stopped the
+torrent.
 
 Live-tested against qBittorrent 4.6.3, Transmission 4.0.5, Deluge 2.1.2
 (libtorrent 2.0.10) and rTorrent 0.9.8 behind nginx. Each passed with a 300 KB

@@ -18,9 +18,12 @@ import { Rtorrent } from './seedbox/rtorrent.js'
 import { Transmission } from './seedbox/transmission.js'
 import { type FetchLike, type SeedBox, type WebSeedStore, PublishError } from './types.js'
 import { DirWebSeed, S3WebSeed, SshWebSeed } from './webseed.js'
+import { FileWhitelist, SshWhitelist, type TrackerWhitelist } from './whitelist.js'
 
 export interface Publisher {
   webseed: WebSeedStore
+  /** Our tracker's whitelist, when it has one: every infohash goes on it before a box announces. */
+  whitelist?: TrackerWhitelist
   boxes: SeedBox[]
   trackers: string[]
   seedTimeoutMs: number
@@ -70,7 +73,9 @@ export function createPublisher(cfg: PublishConfig, secrets: Secrets, fetchImpl?
     // allowed — but if the box then asks for one, say why none was sent.
     return secrets.seedboxes[b.name] ? box : withAuthHint(box, `no seedboxes.${b.name} entry in ${secrets.file ?? 'the secrets file'}, so no login was sent`)
   })
-  return { webseed, boxes, trackers: cfg.trackers, seedTimeoutMs: cfg.seedTimeoutMs }
+  const wl = cfg.whitelist
+  const whitelist = !wl ? undefined : wl.kind === 'file' ? new FileWhitelist({ file: wl.file }) : new SshWhitelist({ host: wl.host, file: wl.file, ...(wl.port ? { port: wl.port } : {}) })
+  return { webseed, boxes, trackers: cfg.trackers, seedTimeoutMs: cfg.seedTimeoutMs, ...(whitelist ? { whitelist } : {}) }
 }
 
 /** Append `hint` to the errors of `box` that are an HTTP 401. */
@@ -120,6 +125,9 @@ export async function stage(p: Publisher, input: StageInput, now: Date, log: Pub
   writeFileSync(torrentFile, t.metainfo)
   // The .torrent goes beside the bytes so a magnet can name it as `xs`.
   const torrentUrl = await p.webseed.put(`${name}.torrent`, t.metainfo)
+  // Before any box announces: a whitelist-only tracker refuses what it hasn't
+  // been told about. A failure here fails the stage, which is retried.
+  await p.whitelist?.add(t.infohash)
   const rec: PublishRecord = {
     envelopeHash: input.envelopeHash,
     infohash: t.infohash,

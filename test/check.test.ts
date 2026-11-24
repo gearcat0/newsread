@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { checkSeedBox } from '../src/publish/check.js'
 import type { Publisher } from '../src/publish/index.js'
 import type { SeedBox, WebSeedStore } from '../src/publish/types.js'
+import type { TrackerWhitelist } from '../src/publish/whitelist.js'
+import type { ScrapeResult } from '../src/tracker.js'
 
-function rig(steps: (number | null)[], webseedUp = true) {
+function rig(steps: (number | null)[], webseedUp = true, seeders: number[] = [1]) {
   const stored = new Map<string, Uint8Array>()
   const webseed: WebSeedStore = {
     kind: 'mem',
@@ -22,10 +24,23 @@ function rig(steps: (number | null)[], webseedUp = true) {
   }
   let t = 0
   const lines: string[] = []
-  const p: Publisher = { webseed, boxes: [box], trackers: ['udp://t:1'], seedTimeoutMs: 1 }
+  const listed = new Set<string>()
+  const order: string[] = []
+  const whitelist: TrackerWhitelist = {
+    kind: 'mem',
+    add: async (h) => (order.push(`whitelist ${added.size}`), void listed.add(h)),
+    remove: async (h) => void listed.delete(h)
+  }
+  let s = 0
+  const scrape = async (_a: string, h: string): Promise<ScrapeResult | null> =>
+    listed.has(h) ? { complete: seeders[Math.min(s++, seeders.length - 1)]!, incomplete: 0, downloaded: 0 } : null
+  const p: Publisher = { webseed, whitelist, boxes: [box], trackers: ['udp://t:1'], seedTimeoutMs: 1 }
   const run = (keep = false) =>
-    checkSeedBox(p, box, { bytes: 40_000, timeoutMs: 10_000, intervalMs: 1000, keep, say: (l) => lines.push(l), sleep: async (ms) => void (t += ms), now: () => t })
-  return { run, stored, added, lines }
+    checkSeedBox(p, box, {
+      bytes: 40_000, timeoutMs: 10_000, trackerTimeoutMs: 5000, intervalMs: 1000, keep, scrape,
+      say: (l) => lines.push(l), sleep: async (ms) => void (t += ms), now: () => t
+    })
+  return { run, stored, added, lines, listed, order }
 }
 
 describe('seedbox-check', () => {
@@ -37,6 +52,23 @@ describe('seedbox-check', () => {
     expect(r.stored.size).toBe(0)
     expect(r.added.size).toBe(0)
     expect(r.lines).toContain('b: 50.0%')
+    expect(r.order).toEqual(['whitelist 0']) // whitelisted before the box had it
+    expect(r.lines).toContain('tracker udp://t:1: 1 seeder, 0 leechers')
+    expect(r.listed.size).toBe(0)
+  })
+
+  it('fails when a tracker never lists the box as a seeder', async () => {
+    const r = rig([1], true, [0])
+    expect((await r.run()).ok).toBe(false)
+    expect(r.lines).toContain('tracker udp://t:1: no seeders yet')
+    expect(r.lines.join('\n')).toMatch(/b never showed up as a seeder — is the infohash whitelisted/)
+    expect(r.listed.size).toBe(0)
+  })
+
+  it('waits for a slow announce', async () => {
+    const r = rig([1], true, [0, 0, 2])
+    expect((await r.run()).ok).toBe(true)
+    expect(r.lines).toContain('tracker udp://t:1: 2 seeders, 0 leechers')
   })
   it('fails at 0% with a hint, and fails early when the webseed does not answer', async () => {
     const stuck = rig([0])
@@ -52,5 +84,6 @@ describe('seedbox-check', () => {
     const res = await r.run(true)
     expect(r.added.has(res.infohash)).toBe(true)
     expect([...r.stored.keys()].sort()).toEqual([res.name, `${res.name}.torrent`])
+    expect(r.listed.has(res.infohash)).toBe(true)
   })
 })

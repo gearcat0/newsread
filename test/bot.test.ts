@@ -62,7 +62,9 @@ async function setup(over: Partial<UserConfig> = {}) {
   const box = new FakeBox('box1')
   let webseedUp = true
   const webseed = new DirWebSeed({ dir: join(dir, 'www'), baseUrl: 'https://seed.example/t', fetch: async () => new Response(null, { status: webseedUp ? 200 : 404 }) })
-  const publisher: Publisher = { webseed, boxes: [box], trackers: config.publish!.trackers, seedTimeoutMs: 60_000 }
+  const whitelisted: { hash: string; boxHadIt: boolean }[] = []
+  const whitelist = { kind: 'mem', add: async (h: string) => void whitelisted.push({ hash: h, boxHadIt: box.have.has(h) }), remove: async () => undefined }
+  const publisher: Publisher = { webseed, whitelist, boxes: [box], trackers: config.publish!.trackers, seedTimeoutMs: 60_000 }
   const relay = fakeRelay()
   let now = new Date('2026-11-11T12:00:00Z')
   const bot = new Bot({ config, identity, state, publisher, log: quiet, now: () => now, relay: { socket: relay.factory } })
@@ -77,7 +79,7 @@ async function setup(over: Partial<UserConfig> = {}) {
     siteId: 'guardian', path: 'news/theguardian.com/abc', seq: 1, envelopeHash: built.envelopeHash, manifestHash: built.manifestHash,
     contentHash: 'c', firstSeen: now.toISOString(), lastFetched: now.toISOString(), lastEmitted: now.toISOString(), outFile, title: 'Scaffolding goes up'
   })
-  return { dir, config, identity, state, box, relay, bot, built, outFile, setNow: (d: Date) => (now = d), setWebseed: (up: boolean) => (webseedUp = up) }
+  return { dir, config, identity, state, box, relay, bot, built, outFile, whitelisted, setNow: (d: Date) => (now = d), setWebseed: (up: boolean) => (webseedUp = up) }
 }
 
 describe('Bot.publishPending', () => {
@@ -89,6 +91,7 @@ describe('Bot.publishPending', () => {
     expect(existsSync(rec.torrentFile)).toBe(true)
     expect([...readFileSync(join(t.dir, 'www', rec.name))]).toEqual([...t.built.tar])
     expect(t.box.have.has(rec.infohash)).toBe(true)
+    expect(t.whitelisted).toEqual([{ hash: rec.infohash, boxHadIt: false }]) // on the tracker's list before any box announced
     expect(t.relay.events).toHaveLength(0) // nobody has the whole file yet
 
     t.box.progressNow = 1

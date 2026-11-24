@@ -97,6 +97,19 @@ export const runSsh: SshRunner = (args, input, timeoutMs) =>
     child.stdin.end(input)
   })
 
+/** ssh that never prompts, gives up on a dead link, and runs one command. */
+export function sshArgs(host: string, port: number | undefined, command: string): string[] {
+  if (host.startsWith('-')) throw new Error(`bad ssh host ${JSON.stringify(host)}`)
+  return [
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=10',
+    '-o', 'ServerAliveInterval=5',
+    '-o', 'ServerAliveCountMax=3',
+    ...(port ? ['-p', String(port)] : []),
+    '--', host, command
+  ]
+}
+
 /** POSIX single-quoting, for the remote shell. */
 export const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`
 
@@ -125,14 +138,7 @@ export class SshWebSeed implements WebSeedStore {
   }
 
   #args(command: string): string[] {
-    return [
-      '-o', 'BatchMode=yes',
-      '-o', 'ConnectTimeout=10',
-      '-o', 'ServerAliveInterval=5',
-      '-o', 'ServerAliveCountMax=3',
-      ...(this.o.port ? ['-p', String(this.o.port)] : []),
-      '--', this.o.host, command
-    ]
+    return sshArgs(this.o.host, this.o.port, command)
   }
 
   async put(name: string, bytes: Uint8Array): Promise<string> {
