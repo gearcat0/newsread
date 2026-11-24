@@ -38,9 +38,10 @@ publishing (needs \`publish\` and \`relays\` in the config):
   newsread inbox                             read sealed letters to this account once, answer them
   newsread subscribers                       who is subscribed to what
   newsread relays                            check each relay answers; print the key to trust there
-  newsread seedbox-check <box> [--timeout 3m] [--size 300k] [--keep]
+  newsread seedbox-check <box> [--timeout 3m] [--size 300k] [--keep] [--no-trackers]
                                              push a throwaway file through the webseed to one seed
-                                             box and wait for 100% (nothing is announced)
+                                             box, wait for 100%, then for each tracker to list the
+                                             box as a seeder (nothing is announced)
 
 global options:
   --config <path>    config module (default: newsread.config.ts)
@@ -273,7 +274,8 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
         every: { type: 'string' },
         timeout: { type: 'string' },
         size: { type: 'string' },
-        keep: { type: 'boolean' }
+        keep: { type: 'boolean' },
+        'no-trackers': { type: 'boolean' }
       }
     })
   } catch (e) {
@@ -417,7 +419,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
           console.error('--size must be between 1 byte and 64m')
           return 2
         }
-        const r = await checkSeedBox(publisher, box, { bytes, timeoutMs, keep: !!values.keep, say: (l) => console.log(l) })
+        const r = await checkSeedBox(publisher, box, { bytes, timeoutMs, keep: !!values.keep, noTrackers: !!values['no-trackers'], say: (l) => console.log(l) })
         console.log(r.ok ? `ok    ${box.name} (${box.kind})` : `FAIL  ${box.name} (${box.kind})`)
         return r.ok ? 0 : 1
       }

@@ -73,9 +73,18 @@ export type SeedBoxConfig =
   /** rTorrent cannot use webseeds: `directory` must be where the `dir` or `ssh` webseed writes, as rTorrent sees it. */
   | { kind: 'rtorrent'; name: string; url: string; directory: string }
 
+/** A whitelist-only tracker's list (opentracker as Ubuntu/Debian ship it). Each
+ *  infohash is added before the seed boxes announce it. The tracker's host
+ *  reloads the list when the file changes; newsread only edits it. */
+export type WhitelistConfig =
+  | { kind: 'file'; file: string }
+  | { kind: 'ssh'; host: string; file: string; port?: number }
+
 export interface PublishConfig {
   /** Tracker announce URLs, in order. The shell adds none of its own, so these are what readers find peers with (plus DHT). */
   trackers: string[]
+  /** Set when our tracker only tracks what it is told to. */
+  whitelist?: WhitelistConfig
   webseed: WebSeedConfig
   seedboxes: SeedBoxConfig[]
   /** Announce once a box has the whole file; past this, announce on a reachable webseed alone. */
@@ -257,7 +266,13 @@ function checkPublish(p: Partial<PublishConfig>): PublishConfig {
   if (w.kind === 's3' && !(isHttpUrl(w.endpoint) && w.bucket && w.region && isHttpUrl(w.publicBaseUrl))) {
     throw new ConfigError(`publish: webseed 's3' needs endpoint, bucket, region and publicBaseUrl`)
   }
-  return { trackers, seedboxes, seedTimeoutMs: p.seedTimeoutMs ?? DEFAULT_SEED_TIMEOUT_MS, backlogDays: p.backlogDays ?? 2, webseed: w }
+  const wl = p.whitelist
+  if (wl) {
+    if (wl.kind !== 'file' && wl.kind !== 'ssh') throw new ConfigError(`publish: unknown whitelist kind ${JSON.stringify((wl as { kind?: unknown }).kind)}`)
+    if (!wl.file?.startsWith('/')) throw new ConfigError('publish: whitelist needs an absolute `file`')
+    if (wl.kind === 'ssh' && (!wl.host || wl.host.startsWith('-'))) throw new ConfigError('publish: whitelist \'ssh\' needs a host')
+  }
+  return { trackers, seedboxes, seedTimeoutMs: p.seedTimeoutMs ?? DEFAULT_SEED_TIMEOUT_MS, backlogDays: p.backlogDays ?? 2, webseed: w, ...(wl ? { whitelist: wl } : {}) }
 }
 
 function stripUndefined<T extends object>(o: T): Partial<T> {
