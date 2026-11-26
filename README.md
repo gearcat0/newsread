@@ -200,10 +200,20 @@ PathChanged=/etc/opentracker/whitelist.txt
 WantedBy=multi-user.target
 
 # /etc/systemd/system/opentracker-whitelist.service
+[Unit]
+StartLimitIntervalSec=0
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/systemctl reload opentracker.service
 ```
+
+Keep `StartLimitIntervalSec=0`. A scrape tick can whitelist dozens of
+articles in a few seconds. Without it, systemd's default limit of 5 starts
+in 10 seconds stops the reload service, and the path unit fails with it.
+After that nothing reloads: newsread keeps adding infohashes the tracker
+never reads, and it answers "not authorized" to every box and reader. To
+recover, run `systemctl reset-failed` on both units, start the `.path`
+unit, and reload opentracker once.
 
 Make the file writable by the account newsread logs in as, and readable by
 opentracker, for example `chown newsread:_opentracker` with mode `640`.
