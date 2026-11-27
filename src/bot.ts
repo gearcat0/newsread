@@ -98,6 +98,7 @@ export class Bot {
       envelopeHash: story.envelopeHash,
       type: 'article',
       feed: story.siteId,
+      ...(story.title ? { title: story.title } : {}),
       locator: rec.magnet,
       createdAt: Math.floor(now.getTime() / 1000)
     })

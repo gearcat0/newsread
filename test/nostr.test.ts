@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { deriveNostrKey, identityFromKey } from '../src/identity.js'
-import { pointerEvent, inlineEvent, FEED_TAG } from '../src/nostr/announce.js'
+import { pointerEvent, inlineEvent, FEED_TAG, TITLE_TAG } from '../src/nostr/announce.js'
 import { RelayClient } from '../src/nostr/relay.js'
 import { admitBundle, buildSealedBundle, parseBundle, parseThingEvent, toHex, MAX_INLINE_BUNDLE } from '../src/souspli.js'
 import { schnorr } from '@noble/curves/secp256k1.js'
@@ -50,6 +50,19 @@ describe('announce events', () => {
     expect(p.bundle).toBeNull()
     expect(ev.tags).toContainEqual([FEED_TAG, 'guardian'])
     expect(ev.tags.length).toBeLessThanOrEqual(16) // relay/src/nostr.ts tag cap
+  })
+
+  it('a pointer carries the headline as thing-title: one line, cut short, absent when there is none', async () => {
+    const base = { envelopeHash: 'ab'.repeat(32), type: 'article', feed: 'guardian', locator: 'magnet:?xt=urn:btih:' + 'c'.repeat(40), createdAt: 1000 }
+    const titled = await pointerEvent(id.nostr, { ...base, title: '  New York bans\tAI toys\nand a second line ' })
+    expect(titled.tags).toContainEqual([TITLE_TAG, 'New York bans AI toys'])
+    expect('error' in parseThingEvent(titled, MAX_INLINE_BUNDLE)).toBe(false)
+    const long = await pointerEvent(id.nostr, { ...base, title: 'x'.repeat(900) })
+    expect(long.tags.find((t) => t[0] === TITLE_TAG)![1]!.length).toBe(200)
+    for (const title of [undefined, '', '  \n ']) {
+      const ev = await pointerEvent(id.nostr, { ...base, ...(title === undefined ? {} : { title }) })
+      expect(ev.tags.some((t) => t[0] === TITLE_TAG)).toBe(false)
+    }
   })
 
   it('an inline event refuses anything over the cap', async () => {

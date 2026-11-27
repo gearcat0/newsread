@@ -13,10 +13,28 @@ import type { NostrIdentity } from '../identity.js'
 
 export const FEED_TAG = 'thing-feed'
 
+/** What the article is called, so the offer a pointer becomes in a reader's
+ *  feed says what it is about before anyone fetches it. Souspli's tag
+ *  (docs/how/protocol/relay-event.md); named here until the vendored codec
+ *  exports it. The reader treats it as our claim, sanitizes it and cuts it to
+ *  one short line, and ignores a value over 512 characters whole — so it is
+ *  cut here, well under that. */
+export const TITLE_TAG = 'thing-title'
+const MAX_TITLE = 200
+
+function titleTag(title: string | undefined): string[][] {
+  const line = (title ?? '').split(/\r?\n/)[0]!.replace(/\s+/g, ' ').trim()
+  if (!line) return []
+  const points = Array.from(line)
+  return [[TITLE_TAG, points.length > MAX_TITLE ? points.slice(0, MAX_TITLE).join('') : line]]
+}
+
 export interface PointerInput {
   envelopeHash: string
   type: string
   feed: string
+  /** The headline, when there is one. */
+  title?: string
   locator: string
   createdAt: number
 }
@@ -31,6 +49,7 @@ export function pointerEvent(id: NostrIdentity, p: PointerInput): Promise<NostrE
       [TAG.hash, p.envelopeHash],
       [TAG.type, p.type],
       [FEED_TAG, p.feed],
+      ...titleTag(p.title),
       [TAG.fetch, p.locator]
     ]
   })
